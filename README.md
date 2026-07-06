@@ -4,6 +4,16 @@ MeshMonCompanion is a Raspberry Pi bootstrapper and companion control panel for 
 
 It is intended for a clean Raspberry Pi OS / Raspberry Pi OS Lite install with a USB-connected Meshtastic node and internet access.
 
+## Attribution
+
+MeshMonitor is created and maintained by Yeraze:
+
+- MeshMonitor: https://github.com/Yeraze/meshmonitor
+- Project site: https://meshmonitor.org/
+
+MeshMonCompanion is an installer and companion control layer around MeshMonitor.
+It is not the MeshMonitor application itself.
+
 ## What It Installs
 
 - Docker and Docker Compose plugin if needed
