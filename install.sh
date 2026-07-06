@@ -439,6 +439,10 @@ render_compose() {
   run "$INSTALL_DIR/scripts/render-compose.sh"
 }
 
+start_stack() {
+  run sh -c "cd '$INSTALL_DIR' && docker compose up -d"
+}
+
 enable_services() {
   run systemctl daemon-reload
   run systemctl enable --now meshmon-companion.service
@@ -448,6 +452,7 @@ enable_services() {
 uninstall() {
   need_root
   log "Uninstalling services. Backups and config are left in place unless removed manually."
+  run sh -c "cd '$INSTALL_DIR' && docker compose down" 2>/dev/null || true
   run systemctl disable --now meshmon-companion.service meshmon-companion-backup.timer 2>/dev/null || true
   run rm -f /etc/systemd/system/meshmon-companion.service /etc/systemd/system/meshmon-companion-backup.service /etc/systemd/system/meshmon-companion-backup.timer
   run rm -f /etc/sudoers.d/meshmon-companion /usr/local/bin/meshmon-companion
@@ -466,6 +471,7 @@ main() {
   install_files
   write_config
   render_compose
+  start_stack
   enable_services
   log "Install complete. Run: meshmon-companion status"
 }
