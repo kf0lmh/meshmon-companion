@@ -115,7 +115,10 @@ The installer can optionally configure Wi-Fi when NetworkManager and `nmcli` are
 
 MQTT is disabled by default. MQTT rebroadcasting is disabled by default.
 
-If MQTT is enabled in the wizard, the broker and username are written to the local generated config and the password/token is written to a root-owned secret file with restrictive permissions. MQTT rebroadcasting shows an explicit warning because it can increase mesh traffic and affect battery or solar nodes.
+If MQTT is enabled in the wizard, the broker and username are written to the
+local generated config and the password/token is written to a root-owned secret
+file with restrictive permissions. MQTT rebroadcasting shows an explicit
+warning because it can increase mesh traffic and affect battery or solar nodes.
 
 MQTT configuration storage is present in this bootstrapper. Runtime integration should be verified for each MeshMonitor deployment before enabling MQTT-related features in production.
 
@@ -131,7 +134,10 @@ Backups include a manifest and exclude known secret paths by default. Restore su
 
 ## Security Model
 
-The web app runs as a low-privilege `meshmon` service user. It can call only whitelisted scripts through exact sudoers entries. There is no raw terminal, generic service manager, unrestricted file browser, or arbitrary command execution.
+The web app runs as a low-privilege `meshmon` service user. It can call only
+whitelisted scripts through exact sudoers entries. There is no raw terminal,
+generic service manager, unrestricted file browser, or arbitrary command
+execution.
 
 ## Commands
 
@@ -149,7 +155,10 @@ meshmon-companion update
 meshmon-companion uninstall
 ```
 
-`doctor` prints a single troubleshooting report with config, service status, Docker containers, listening ports, URL checks, and recent logs. Use `--privacy` before sharing output publicly; it redacts IP addresses, MAC addresses, and obvious secret fields.
+`doctor` prints a single troubleshooting report with config, service status,
+Docker containers, listening ports, URL checks, and recent logs. Use `--privacy`
+before sharing output publicly; it redacts IP addresses, MAC addresses, and
+obvious secret fields.
 
 ## Example Values
 

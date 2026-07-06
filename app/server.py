@@ -178,8 +178,22 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/backups":
             result = run_script("list-backups.sh", timeout=15, sudo=True)
             latest = latest_backup()
-            download = "<p>No backup is available to download.</p>" if latest is None else "<p><a href='/backup/latest'>Download latest backup</a></p>"
-            body = f"<h1>Backups</h1><form method='post' action='/backup/create'><label>Backup name <input name='label' maxlength='48' autocomplete='off'></label><button>Create Backup</button></form>{download}<pre>{esc(result.stdout or 'No backups found')}</pre><p><a href='/'>Back</a></p>"
+            if latest is None:
+                download = "<p>No backup is available to download.</p>"
+            else:
+                download = "<p><a href='/backup/latest'>Download latest backup</a></p>"
+            body = (
+                "<h1>Backups</h1>"
+                "<form method='post' action='/backup/create'>"
+                "<label>Backup name "
+                "<input name='label' maxlength='48' autocomplete='off'>"
+                "</label>"
+                "<button>Create Backup</button>"
+                "</form>"
+                f"{download}"
+                f"<pre>{esc(result.stdout or 'No backups found')}</pre>"
+                "<p><a href='/'>Back</a></p>"
+            )
             self.send_html(page(body))
         elif path == "/backup/latest":
             latest = latest_backup()

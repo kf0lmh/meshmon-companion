@@ -116,11 +116,24 @@ doctor_report() {
 }
 
 system_status() {
-  run_shell "System Status" "hostnamectl; echo; uptime; echo; free -h; echo; df -h / /boot/firmware 2>/dev/null || df -h /; echo; command -v vcgencmd >/dev/null && { sudo vcgencmd get_throttled; sudo vcgencmd measure_temp; } || true; echo; systemctl --failed --no-pager"
+  local cmd
+  cmd="hostnamectl; echo; uptime; echo; free -h; echo; "
+  cmd+="df -h / /boot/firmware 2>/dev/null || df -h /; echo; "
+  cmd+="command -v vcgencmd >/dev/null && "
+  cmd+="{ sudo vcgencmd get_throttled; sudo vcgencmd measure_temp; } || true; "
+  cmd+="echo; systemctl --failed --no-pager"
+  run_shell "System Status" "$cmd"
 }
 
 network_status() {
-  run_shell "Network / Tailscale" "ip -br addr; echo; ip route; echo; command -v nmcli >/dev/null && nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status || true; echo; command -v tailscale >/dev/null && { tailscale status; echo; tailscale ip -4; } || echo 'Tailscale not installed/found'"
+  local cmd
+  cmd="ip -br addr; echo; ip route; echo; "
+  cmd+="command -v nmcli >/dev/null && "
+  cmd+="nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status || true; "
+  cmd+="echo; command -v tailscale >/dev/null && "
+  cmd+="{ tailscale status; echo; tailscale ip -4; } || "
+  cmd+="echo 'Tailscale not installed/found'"
+  run_shell "Network / Tailscale" "$cmd"
 }
 
 meshmonitor_status() {
@@ -128,13 +141,19 @@ meshmonitor_status() {
   port="$(mesh_port)"
   host="$(display_host)"
   port="${port:-8080}"
-  run_shell "MeshMonitor Status" "cd '$ROOT' && docker compose ps meshmonitor; echo; curl -sS --max-time 10 'http://$host:$port/api/status' | python3 -m json.tool"
+  run_shell "MeshMonitor Status" \
+    "cd '$ROOT' && docker compose ps meshmonitor; echo; curl -sS --max-time 10 'http://$host:$port/api/status' | python3 -m json.tool"
 }
 
 serial_bridge_status() {
   local device
+  local cmd
   device="$(serial_device)"
-  run_shell "Serial Bridge Status" "cd '$ROOT' && docker compose ps serial-bridge; echo; test -n '$device' && ls -l '$device' 2>/dev/null || true; ls -l /dev/ttyACM* /dev/ttyUSB* 2>/dev/null || true; echo; docker logs --tail 80 meshmon-serial-bridge 2>&1"
+  cmd="cd '$ROOT' && docker compose ps serial-bridge; echo; "
+  cmd+="test -n '$device' && ls -l '$device' 2>/dev/null || true; "
+  cmd+="ls -l /dev/ttyACM* /dev/ttyUSB* 2>/dev/null || true; echo; "
+  cmd+="docker logs --tail 80 meshmon-serial-bridge 2>&1"
+  run_shell "Serial Bridge Status" "$cmd"
 }
 
 create_backup() {
