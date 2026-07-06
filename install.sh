@@ -180,6 +180,10 @@ install_packages() {
     run apt-get update
     run apt-get install -y rsync
   fi
+  if ! command -v whiptail >/dev/null 2>&1 && ! command -v dialog >/dev/null 2>&1; then
+    run apt-get update
+    run apt-get install -y whiptail
+  fi
 }
 
 prepare_source() {
@@ -429,6 +433,7 @@ install_files() {
   run chown root:root "$INSTALL_DIR"/scripts/*.sh
   run chmod 755 "$INSTALL_DIR"/scripts/*.sh
   run install -o root -g root -m 0755 "$INSTALL_DIR/scripts/meshmon-companion.sh" /usr/local/bin/meshmon-companion
+  run install -o root -g root -m 0755 "$INSTALL_DIR/scripts/companion-menu.sh" /usr/local/bin/companion-menu
   run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/meshmon-companion.service" /etc/systemd/system/meshmon-companion.service
   run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/meshmon-companion-backup.service" /etc/systemd/system/meshmon-companion-backup.service
   run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/meshmon-companion-backup.timer" /etc/systemd/system/meshmon-companion-backup.timer
@@ -494,6 +499,7 @@ print_install_summary() {
   echo "Access mode: ${access_mode:-unknown}"
   echo "Control panel: http://${display_host}:${control_port}"
   echo "MeshMonitor:   http://${display_host}:${mesh_port}"
+  echo "SSH menu:      companion-menu"
   echo
   echo "Docker stack:"
   run sh -c "cd '$INSTALL_DIR' && docker compose ps"
@@ -509,7 +515,7 @@ uninstall() {
   run sh -c "cd '$INSTALL_DIR' && docker compose down" 2>/dev/null || true
   run systemctl disable --now meshmon-companion.service meshmon-companion-backup.timer 2>/dev/null || true
   run rm -f /etc/systemd/system/meshmon-companion.service /etc/systemd/system/meshmon-companion-backup.service /etc/systemd/system/meshmon-companion-backup.timer
-  run rm -f /etc/sudoers.d/meshmon-companion /usr/local/bin/meshmon-companion
+  run rm -f /etc/sudoers.d/meshmon-companion /usr/local/bin/meshmon-companion /usr/local/bin/companion-menu
   run systemctl daemon-reload
 }
 

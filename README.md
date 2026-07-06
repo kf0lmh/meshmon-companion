@@ -10,6 +10,7 @@ It is intended for a clean Raspberry Pi OS / Raspberry Pi OS Lite install with a
 - MeshMonitor
 - meshtastic-serial-bridge
 - MeshMonCompanion web control panel
+- SSH-friendly terminal menu: `companion-menu`
 - Health, backup, restore, diagnostics, and restart scripts
 - systemd services and timers
 - Tight sudoers rules for approved scripts only
@@ -136,6 +137,8 @@ The web app runs as a low-privilege `meshmon` service user. It can call only whi
 
 ```bash
 meshmon-companion status
+companion-menu
+meshmon-companion menu
 meshmon-companion health
 meshmon-companion doctor
 meshmon-companion doctor --privacy
