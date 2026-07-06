@@ -35,10 +35,16 @@ less install.sh
 sudo bash install.sh
 ```
 
-One-command method:
+Logged one-command method:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh -o /tmp/meshmon-companion-install.sh && sudo bash /tmp/meshmon-companion-install.sh
+```
+
+The installer prints the log path at startup. By default it writes to:
+
+```text
+/tmp/meshmon-companion-install-YYYY-MM-DD_HHMMSS.log
 ```
 
 Installer options:

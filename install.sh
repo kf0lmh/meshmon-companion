@@ -9,10 +9,24 @@ SERVICE_USER="meshmon"
 OWNER="${MESHMON_COMPANION_OWNER:-kf0lmh}"
 REPO_URL="https://github.com/${OWNER}/meshmon-companion"
 SOURCE_DIR=""
+LOG_FILE="${MESHMON_COMPANION_LOG:-/tmp/meshmon-companion-install-$(date +%F_%H%M%S).log}"
 
 DRY_RUN=0
 MODE="install"
 WIZARD=1
+
+start_logging() {
+  if [[ "${MESHMON_COMPANION_NO_LOG:-0}" == "1" || -n "${MESHMON_COMPANION_LOG_ACTIVE:-}" ]]; then
+    return
+  fi
+  export MESHMON_COMPANION_LOG_ACTIVE=1
+  touch "$LOG_FILE"
+  chmod 600 "$LOG_FILE" 2>/dev/null || true
+  exec > >(tee -a "$LOG_FILE") 2>&1
+  printf '[%s] Install log: %s\n' "$PROJECT_NAME" "$LOG_FILE"
+}
+
+start_logging
 
 usage() {
   cat <<'EOF'
@@ -31,7 +45,10 @@ Options:
 Review-first install:
   curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh -o install.sh
   less install.sh
-  bash install.sh
+  sudo bash install.sh
+
+Logged one-command install:
+  curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh -o /tmp/meshmon-companion-install.sh && sudo bash /tmp/meshmon-companion-install.sh
 EOF
 }
 
