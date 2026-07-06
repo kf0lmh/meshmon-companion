@@ -520,6 +520,34 @@ warn_disk_size() {
   fi
 }
 
+meshmonitor_api_url() {
+  local control_bind mesh_port mesh_host
+  control_bind="$(config_value control_bind)"
+  mesh_port="$(config_section_value ports meshmonitor)"
+  mesh_port="${mesh_port:-8080}"
+  mesh_host="$control_bind"
+  if [[ -z "$mesh_host" || "$mesh_host" == "0.0.0.0" || "$mesh_host" == "::" ]]; then
+    mesh_host="127.0.0.1"
+  fi
+  printf 'http://%s:%s/api/status\n' "$mesh_host" "$mesh_port"
+}
+
+wait_for_meshmonitor_api() {
+  local url deadline
+  [[ "$DRY_RUN" == "1" ]] && return
+  url="$(meshmonitor_api_url)"
+  deadline=$((SECONDS + 90))
+  log "Waiting for MeshMonitor API at $url"
+  while (( SECONDS < deadline )); do
+    if curl -fsS --max-time 4 "$url" >/dev/null 2>&1; then
+      log "MeshMonitor API is responding."
+      return
+    fi
+    sleep 5
+  done
+  echo "Warning: MeshMonitor API did not respond within 90 seconds; continuing." >&2
+}
+
 print_install_summary() {
   local control_bind access_mode mesh_port control_port display_host
   [[ "$DRY_RUN" == "1" ]] && return
@@ -574,6 +602,7 @@ main() {
   render_compose
   start_stack
   enable_services
+  wait_for_meshmonitor_api
   print_install_summary
   log "Install complete. Run: meshmon-companion doctor for a full diagnostic report."
 }
