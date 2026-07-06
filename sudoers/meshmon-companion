@@ -1,0 +1,11 @@
+meshmon ALL=(root) NOPASSWD: /opt/meshmon-companion/scripts/healthcheck.sh
+meshmon ALL=(root) NOPASSWD: /opt/meshmon-companion/scripts/backup-now.sh
+meshmon ALL=(root) NOPASSWD: /opt/meshmon-companion/scripts/list-backups.sh
+meshmon ALL=(root) NOPASSWD: /opt/meshmon-companion/scripts/restore-backup.sh
+meshmon ALL=(root) NOPASSWD: /opt/meshmon-companion/scripts/restart-meshmonitor.sh
+meshmon ALL=(root) NOPASSWD: /opt/meshmon-companion/scripts/restart-serial-bridge.sh
+meshmon ALL=(root) NOPASSWD: /opt/meshmon-companion/scripts/restart-mesh-stack.sh
+meshmon ALL=(root) NOPASSWD: /opt/meshmon-companion/scripts/restart-control-panel.sh
+meshmon ALL=(root) NOPASSWD: /opt/meshmon-companion/scripts/restart-tailscale.sh
+meshmon ALL=(root) NOPASSWD: /opt/meshmon-companion/scripts/reboot-pi.sh
+meshmon ALL=(root) NOPASSWD: /usr/bin/vcgencmd get_throttled, /usr/bin/vcgencmd measure_temp

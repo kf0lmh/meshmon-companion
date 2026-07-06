@@ -1,0 +1,11 @@
+[Unit]
+Description=Run MeshMonCompanion automatic backup check
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Unit=meshmon-companion-backup.service
+
+[Install]
+WantedBy=timers.target

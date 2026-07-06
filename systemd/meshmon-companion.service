@@ -1,0 +1,22 @@
+[Unit]
+Description=MeshMonCompanion control panel
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=meshmon
+Group=meshmon
+Environment=MESHMON_COMPANION_ROOT=/opt/meshmon-companion
+Environment=MESHMON_COMPANION_CONFIG=/etc/meshmon-companion/config.yaml
+EnvironmentFile=-/etc/default/meshmon-companion
+WorkingDirectory=/opt/meshmon-companion
+ExecStart=/usr/bin/python3 /opt/meshmon-companion/app/server.py
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/meshmon-companion /etc/meshmon-companion
+
+[Install]
+WantedBy=multi-user.target

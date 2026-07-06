@@ -1,0 +1,6 @@
+[Unit]
+Description=MeshMonCompanion automatic backup check
+
+[Service]
+Type=oneshot
+ExecStart=/opt/meshmon-companion/scripts/auto-backup.sh

@@ -1,0 +1,42 @@
+# Example-only MeshMonCompanion config. Copy to /etc/meshmon-companion/config.yaml.
+# Do not commit generated local configs or credentials.
+
+hostname_label: example-node
+access_mode: localhost
+control_bind: 127.0.0.1
+
+ports:
+  meshmonitor: 8080
+  control_panel: 8090
+  virtual_node: 4404
+
+serial:
+  connection_type: usb
+  device: /dev/serial/by-id/usb-EXAMPLE_Meshtastic_Device
+  baud: 115200
+  tcp_host: ""
+  tcp_port: 4403
+
+tailscale:
+  enabled: false
+  ip: 100.64.0.10
+
+meshmonitor:
+  image: ghcr.io/yeraze/meshmonitor:latest
+  allowed_origins:
+    - http://127.0.0.1:8080
+
+serial_bridge:
+  image: ghcr.io/yeraze/meshtastic-serial-bridge:latest
+
+mqtt:
+  enabled: false
+  rebroadcast_enabled: false
+  broker: ""
+  username: ""
+  password_file: /etc/meshmon-companion/secrets/mqtt-password
+
+backups:
+  include_secret_paths: false
+  schedule: daily
+  max_mb: 500
