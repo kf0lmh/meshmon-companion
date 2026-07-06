@@ -347,15 +347,39 @@ optional_wifi_setup() {
     echo "NetworkManager/nmcli not found. Wi-Fi setup is not implemented for this backend yet." >&2
     return
   fi
+  if nmcli radio wifi 2>/dev/null | grep -qi disabled; then
+    log "Wi-Fi radio is disabled; enabling it."
+    run nmcli radio wifi on
+    sleep 2
+  fi
   ssid="$(ask "Wi-Fi SSID" "")"
   pass="$(ask_secret "Wi-Fi password (input hidden)")"
   if [[ -z "$ssid" || -z "$pass" ]]; then
     echo "SSID and password are required; skipping Wi-Fi setup." >&2
     return
   fi
+  log "Scanning for Wi-Fi networks."
+  nmcli dev wifi rescan 2>/dev/null || true
+  sleep 4
+  echo "Visible Wi-Fi networks:"
+  nmcli -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | sed -n '1,12p' || true
   echo "Changing Wi-Fi can disconnect SSH."
   if ask_yes_no "Type yes to continue with Wi-Fi change" "no"; then
-    run nmcli dev wifi connect "$ssid" password "$pass"
+    if [[ "$DRY_RUN" == "1" ]]; then
+      run nmcli dev wifi connect "$ssid" password REDACTED
+      return
+    fi
+    for attempt in 1 2 3; do
+      log "Connecting to Wi-Fi SSID '$ssid' (attempt $attempt of 3)."
+      if nmcli dev wifi connect "$ssid" password "$pass"; then
+        log "Wi-Fi connected to '$ssid'."
+        return
+      fi
+      nmcli dev wifi rescan 2>/dev/null || true
+      sleep 5
+    done
+    echo "Warning: Wi-Fi connection to '$ssid' failed after 3 attempts; continuing install." >&2
+    echo "Check SSID spelling, 2.4 GHz support, country/regulatory settings, and password." >&2
   fi
 }
 
