@@ -29,7 +29,7 @@ It is intended for a clean Raspberry Pi OS / Raspberry Pi OS Lite install with a
 Review-first method:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/meshmon-companion/main/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh -o install.sh
 less install.sh
 sudo bash install.sh
 ```
@@ -37,7 +37,7 @@ sudo bash install.sh
 One-command method:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/meshmon-companion/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh | sudo bash
 ```
 
 Installer options:

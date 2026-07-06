@@ -6,7 +6,7 @@ INSTALL_DIR="/opt/meshmon-companion"
 CONFIG_DIR="/etc/meshmon-companion"
 CONFIG_FILE="$CONFIG_DIR/config.yaml"
 SERVICE_USER="meshmon"
-OWNER="${MESHMON_COMPANION_OWNER:-OWNER}"
+OWNER="${MESHMON_COMPANION_OWNER:-kf0lmh}"
 REPO_URL="https://github.com/${OWNER}/meshmon-companion"
 SOURCE_DIR=""
 
@@ -29,7 +29,7 @@ Options:
   --non-interactive  Use conservative defaults and skip optional setup prompts
 
 Review-first install:
-  curl -fsSL https://raw.githubusercontent.com/OWNER/meshmon-companion/main/install.sh -o install.sh
+  curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh -o install.sh
   less install.sh
   bash install.sh
 EOF
