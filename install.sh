@@ -440,13 +440,67 @@ render_compose() {
 }
 
 start_stack() {
-  run sh -c "cd '$INSTALL_DIR' && docker compose up -d"
+  run sh -c "cd '$INSTALL_DIR' && docker compose up -d --remove-orphans"
 }
 
 enable_services() {
   run systemctl daemon-reload
-  run systemctl enable --now meshmon-companion.service
+  run systemctl enable meshmon-companion.service
+  run systemctl restart meshmon-companion.service
   run systemctl enable --now meshmon-companion-backup.timer
+}
+
+config_value() {
+  local key="$1"
+  awk -F': *' -v key="$key" '$1 == key {gsub(/^"|"$/, "", $2); print $2; exit}' "$CONFIG_FILE" 2>/dev/null
+}
+
+config_section_value() {
+  local section="$1" key="$2"
+  awk -v section="$section" -v key="$key" '
+    $0 ~ "^[^[:space:]].*:$" { current=$1; sub(/:$/, "", current) }
+    current == section && $1 == key ":" { print $2; exit }
+  ' "$CONFIG_FILE" 2>/dev/null
+}
+
+warn_disk_size() {
+  local size_gb used avail pct
+  [[ "$DRY_RUN" == "1" ]] && return
+  read -r size_gb used avail pct < <(df -BG / | awk 'NR == 2 {gsub("G", "", $2); print $2, $3, $4, $5}')
+  if [[ -n "${size_gb:-}" && "$size_gb" =~ ^[0-9]+$ && "$size_gb" -lt 12 ]]; then
+    echo
+    echo "Warning: root filesystem is only ${size_gb}G. 16G minimum is recommended; 32G or larger is better for Docker logs, updates, and backups."
+    echo "Current root usage: used ${used}, free ${avail}, ${pct} full."
+  fi
+}
+
+print_install_summary() {
+  local control_bind access_mode mesh_port control_port display_host
+  [[ "$DRY_RUN" == "1" ]] && return
+  control_bind="$(config_value control_bind)"
+  access_mode="$(config_value access_mode)"
+  mesh_port="$(config_section_value ports meshmonitor)"
+  control_port="$(config_section_value ports control_panel)"
+  mesh_port="${mesh_port:-8080}"
+  control_port="${control_port:-8090}"
+  display_host="$control_bind"
+  if [[ -z "$display_host" || "$display_host" == "0.0.0.0" ]]; then
+    display_host="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  display_host="${display_host:-127.0.0.1}"
+
+  echo
+  log "Install/update summary"
+  echo "Access mode: ${access_mode:-unknown}"
+  echo "Control panel: http://${display_host}:${control_port}"
+  echo "MeshMonitor:   http://${display_host}:${mesh_port}"
+  echo
+  echo "Docker stack:"
+  run sh -c "cd '$INSTALL_DIR' && docker compose ps"
+  echo
+  echo "Health:"
+  run "$INSTALL_DIR/scripts/healthcheck.sh" --json || true
+  warn_disk_size
 }
 
 uninstall() {
@@ -473,7 +527,8 @@ main() {
   render_compose
   start_stack
   enable_services
-  log "Install complete. Run: meshmon-companion status"
+  print_install_summary
+  log "Install complete. Run: meshmon-companion doctor for a full diagnostic report."
 }
 
 main

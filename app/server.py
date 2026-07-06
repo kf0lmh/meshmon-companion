@@ -31,6 +31,100 @@ def esc(value):
     return html.escape(str(value if value is not None else "Unknown"))
 
 
+def nested(data, *keys, default=None):
+    value = data
+    for key in keys:
+        if not isinstance(value, dict):
+            return default
+        value = value.get(key)
+    return default if value is None else value
+
+
+def service_label(value):
+    return "Online" if value == "ok" or value == "active" else str(value or "Unknown").title()
+
+
+def metric_card(label, value, tone=""):
+    tone_class = f" {tone}" if tone else ""
+    return f"<article class='metric{tone_class}'><span>{esc(label)}</span><strong>{esc(value)}</strong></article>"
+
+
+def render_home(data):
+    overall = str(data.get("overall", "unknown"))
+    mesh_url = nested(data, "services", "meshmonitor_url", default="")
+    mesh_link = mesh_url.rsplit("/api/status", 1)[0] if mesh_url else ""
+    warnings = data.get("warnings") or []
+    errors = data.get("errors") or []
+    docker = nested(data, "services", "docker", default="unknown")
+    control = nested(data, "services", "control_panel", default="unknown")
+    mesh_api = nested(data, "services", "meshmonitor_api", default="unknown")
+    serial = "Present" if nested(data, "serial", "present", default=False) else "Not detected"
+    throttled = nested(data, "power", "throttled", default="")
+    power = "Good" if throttled in ("", "throttled=0x0") else "Check power"
+    disk = nested(data, "storage", "root_used_percent", default="Unknown")
+    disk_label = f"{disk}% used" if isinstance(disk, (int, float)) else disk
+
+    issue_items = ""
+    if errors or warnings:
+        items = "".join(f"<li>{esc(item)}</li>" for item in [*errors, *warnings])
+        issue_items = f"<section class='notice'><h2>Needs Attention</h2><ul>{items}</ul></section>"
+
+    mesh_button = f"<a class='button primary' href='{esc(mesh_link)}'>Open MeshMonitor</a>" if mesh_link else ""
+    raw_status = esc(json.dumps(data, indent=2))
+
+    return f"""
+      <section class='hero'>
+        <div>
+          <p class='eyebrow'>MeshMonCompanion</p>
+          <h1>{esc(nested(data, "system", "hostname", default="Node"))}</h1>
+          <p class='subtle'>Control panel and health monitor for this MeshMonitor node.</p>
+        </div>
+        <p class='status {esc(overall)}'>{esc(overall).title()}</p>
+      </section>
+
+      <section class='metrics'>
+        {metric_card("MeshMonitor", service_label(mesh_api), "good" if mesh_api == "ok" else "bad")}
+        {metric_card("Serial Node", serial, "good" if serial == "Present" else "warn")}
+        {metric_card("Docker", service_label(docker), "good" if docker == "active" else "bad")}
+        {metric_card("Control Panel", service_label(control), "good" if control == "active" else "bad")}
+        {metric_card("Tailscale", nested(data, "network", "tailscale_ip", default="Not found"))}
+        {metric_card("Temperature", nested(data, "power", "temperature", default="Unknown"))}
+        {metric_card("Power", power, "good" if power == "Good" else "warn")}
+        {metric_card("Disk", disk_label)}
+      </section>
+
+      {issue_items}
+
+      <section class='actions-panel'>
+        <div class='section-title'>
+          <h2>Open</h2>
+          <a href='/api/status'>Raw status</a>
+        </div>
+        <nav class='quick-links'>
+          {mesh_button}
+          <a class='button' href='/backups'>Backups</a>
+        </nav>
+      </section>
+
+      <section class='actions-panel'>
+        <h2>Controls</h2>
+        <form class='actions' method='post'>
+          <button formaction='/action/restart-meshmonitor'>Restart MeshMonitor</button>
+          <button formaction='/action/restart-serial-bridge'>Restart Serial Bridge</button>
+          <button formaction='/action/restart-control-panel'>Restart Control Panel</button>
+          <button formaction='/action/restart-mesh-stack' onclick="return confirm('Restart the full mesh stack?')">Restart Full Stack</button>
+          <button formaction='/action/restart-tailscale' onclick="return confirm('Restart Tailscale? This may interrupt remote access.')">Restart Tailscale</button>
+          <button class='danger' formaction='/action/reboot-pi' onclick="return confirm('Reboot this Pi now?')">Reboot Pi</button>
+        </form>
+      </section>
+
+      <details class='raw'>
+        <summary>Technical Details</summary>
+        <pre>{raw_status}</pre>
+      </details>
+    """
+
+
 def page(body):
     return f"""<!doctype html>
 <html lang="en">
@@ -78,18 +172,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path == "/":
             data = health()
-            actions = """
-              <form class='actions' method='post'>
-                <button formaction='/action/restart-meshmonitor'>Restart MeshMonitor</button>
-                <button formaction='/action/restart-serial-bridge'>Restart serial bridge</button>
-                <button formaction='/action/restart-control-panel'>Restart control panel</button>
-                <button formaction='/action/restart-mesh-stack' onclick="return confirm('Restart the full mesh stack?')">Restart full mesh stack</button>
-                <button formaction='/action/restart-tailscale' onclick="return confirm('Restart Tailscale? This may interrupt remote access.')">Restart Tailscale</button>
-                <button formaction='/action/reboot-pi' onclick="return confirm('Reboot this Pi now?')">Reboot Pi</button>
-              </form>
-            """
-            body = f"<h1>MeshMonCompanion</h1><p class='status {esc(data.get('overall'))}'>{esc(data.get('overall')).title()}</p><pre>{esc(json.dumps(data, indent=2))}</pre><nav><a href='/backups'>Backups</a></nav>{actions}"
-            self.send_html(page(body))
+            self.send_html(page(render_home(data)))
         elif path == "/api/status":
             self.send_json(health())
         elif path == "/backups":

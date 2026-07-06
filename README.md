@@ -52,6 +52,28 @@ Installer options:
 
 The normal installer runs an interactive wizard. Use `--non-interactive` only for conservative default installs where prompts are not possible.
 
+At the end of install or update, the installer prints the detected access URLs, Docker stack status, health status, and a warning if the root filesystem is too small for comfortable Docker/log/backup use.
+
+## Updating a Checkout
+
+For private-repo test installs, pull updates as the normal login user. Do not run `sudo git pull`; that can leave root-owned files inside `.git` and break later pulls.
+
+```bash
+cd ~/meshmon-companion
+git pull
+sudo ./install.sh --update
+```
+
+If a previous `sudo git pull` caused permission errors, repair ownership once:
+
+```bash
+cd ~
+sudo chown -R "$USER:$USER" meshmon-companion
+cd meshmon-companion
+git pull
+sudo ./install.sh --update
+```
+
 ## Supported Systems
 
 - Raspberry Pi OS
@@ -115,12 +137,16 @@ The web app runs as a low-privilege `meshmon` service user. It can call only whi
 ```bash
 meshmon-companion status
 meshmon-companion health
+meshmon-companion doctor
+meshmon-companion doctor --privacy
 meshmon-companion backup
 meshmon-companion restore --dry-run BACKUP_FILE
 meshmon-companion diagnostics --privacy
 meshmon-companion update
 meshmon-companion uninstall
 ```
+
+`doctor` prints a single troubleshooting report with config, service status, Docker containers, listening ports, URL checks, and recent logs. Use `--privacy` before sharing output publicly; it redacts IP addresses, MAC addresses, and obvious secret fields.
 
 ## Example Values
 

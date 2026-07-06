@@ -12,6 +12,7 @@ meshmon-companion commands:
   restore [--dry-run] BACKUP_FILE
   update
   uninstall
+  doctor [--privacy]
   diagnostics [--privacy]
 EOF
 }
@@ -26,7 +27,8 @@ case "$cmd" in
   restore) sudo "$ROOT/scripts/restore-backup.sh" "$@" ;;
   update) sudo "$ROOT/update.sh" ;;
   uninstall) sudo "$ROOT/uninstall.sh" ;;
-  diagnostics) "$ROOT/scripts/diagnostics.sh" "$@" ;;
+  doctor) sudo "$ROOT/scripts/doctor.sh" "$@" ;;
+  diagnostics) sudo "$ROOT/scripts/diagnostics.sh" "$@" ;;
   --help|-h|help) usage ;;
   *) usage; exit 2 ;;
 esac
