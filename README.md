@@ -1,8 +1,20 @@
 # MeshMonCompanion
 
-MeshMonCompanion is a Raspberry Pi bootstrapper and companion control panel for MeshMonitor-based Meshtastic nodes.
+MeshMonCompanion turns a clean Raspberry Pi into a MeshMonitor companion node
+for a USB-connected Meshtastic radio.
 
-It is intended for a clean Raspberry Pi OS / Raspberry Pi OS Lite install with a USB-connected Meshtastic node and internet access.
+It installs MeshMonitor, a serial bridge, a small companion control panel, and
+an SSH-friendly terminal menu so a field node can be installed, checked, backed
+up, and restarted without hand-building the stack each time.
+
+Typical use:
+
+- Flash Raspberry Pi OS or Raspberry Pi OS Lite.
+- Plug in a USB Meshtastic device.
+- Run the installer.
+- Open MeshMonitor on port `8080`.
+- Open MeshMonCompanion on port `8090`.
+- Use `companion-menu` over SSH for quick field maintenance.
 
 ## Attribution
 
@@ -14,7 +26,29 @@ MeshMonitor is created and maintained by Yeraze:
 MeshMonCompanion is an installer and companion control layer around MeshMonitor.
 It is not the MeshMonitor application itself.
 
-## What It Installs
+## Quick Install
+
+Logged one-command install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh -o /tmp/meshmon-companion-install.sh && sudo bash /tmp/meshmon-companion-install.sh
+```
+
+The installer prints a log path at startup. By default it writes to:
+
+```text
+/tmp/meshmon-companion-install-YYYY-MM-DD_HHMMSS.log
+```
+
+Review-first install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh -o install.sh
+less install.sh
+sudo bash install.sh
+```
+
+## What You Get
 
 - Docker and Docker Compose plugin if needed
 - MeshMonitor
@@ -26,38 +60,30 @@ It is not the MeshMonitor application itself.
 - Tight sudoers rules for approved scripts only
 - An interactive first-run setup wizard
 
-## What It Does Not Do
-
-- It does not include credentials.
-- It does not include Wi-Fi passwords, Tailscale auth keys, SSH keys, logs, or generated local configs.
-- It does not enable MQTT by default.
-- It does not enable MQTT rebroadcasting by default.
-- It does not expose admin tools publicly by default.
-- It does not enable GPIO shutdown overlays by default.
-
-## Install
-
-Review-first method:
+## Main Commands
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh -o install.sh
-less install.sh
-sudo bash install.sh
+meshmon-companion status
+companion-menu
+meshmon-companion menu
+meshmon-companion health
+meshmon-companion doctor
+meshmon-companion doctor --privacy
+meshmon-companion backup
+meshmon-companion restore --dry-run BACKUP_FILE
+meshmon-companion update
+meshmon-companion uninstall
 ```
 
-Logged one-command method:
+`doctor` prints a single troubleshooting report with config, service status,
+Docker containers, listening ports, URL checks, and recent logs. Use `--privacy`
+before sharing output publicly; it redacts IP addresses, MAC addresses, and
+obvious secret fields.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh -o /tmp/meshmon-companion-install.sh && sudo bash /tmp/meshmon-companion-install.sh
-```
+## Installer Options
 
-The installer prints the log path at startup. By default it writes to:
-
-```text
-/tmp/meshmon-companion-install-YYYY-MM-DD_HHMMSS.log
-```
-
-Installer options:
+The normal installer runs an interactive wizard. Use `--non-interactive` only
+for conservative default installs where prompts are not possible.
 
 ```bash
 ./install.sh --help
@@ -67,13 +93,40 @@ Installer options:
 ./install.sh --non-interactive
 ```
 
-The normal installer runs an interactive wizard. Use `--non-interactive` only for conservative default installs where prompts are not possible.
+At the end of install or update, the installer prints the detected access URLs,
+Docker stack status, health status, and a warning if the root filesystem is too
+small for comfortable Docker/log/backup use.
 
-At the end of install or update, the installer prints the detected access URLs, Docker stack status, health status, and a warning if the root filesystem is too small for comfortable Docker/log/backup use.
+## Security Defaults
+
+MeshMonCompanion is meant to be safe by default for small field deployments:
+
+- No credentials, Wi-Fi passwords, Tailscale auth keys, SSH keys, logs, or
+  generated local configs are included in this repository.
+- MQTT and MQTT rebroadcasting are disabled unless explicitly enabled.
+- Admin tools are not exposed publicly by default.
+- The web app runs as a low-privilege `meshmon` service user.
+- The web app can call only whitelisted scripts through exact sudoers entries.
+- There is no raw terminal, generic service manager, unrestricted file browser,
+  or arbitrary command execution in the web panel.
+
+## Access Modes
+
+MeshMonCompanion is designed around controlled admin exposure:
+
+- Tailscale-only when Tailscale is installed and selected
+- Localhost-only as the safest non-Tailscale default
+- LAN-only when explicitly selected
+- All interfaces only when explicitly selected and understood
+
+The serial bridge stays Docker-internal unless the user explicitly opts into
+host exposure.
 
 ## Updating a Checkout
 
-For private-repo test installs, pull updates as the normal login user. Do not run `sudo git pull`; that can leave root-owned files inside `.git` and break later pulls.
+If you installed from a cloned checkout, pull updates as the normal login user.
+Do not run `sudo git pull`; that can leave root-owned files inside `.git` and
+break later pulls.
 
 ```bash
 cd ~/meshmon-companion
@@ -86,7 +139,7 @@ If a previous `sudo git pull` caused permission errors, repair ownership once:
 ```bash
 cd ~
 sudo chown -R "$USER:$USER" meshmon-companion
-cd meshmon-companion
+cd ~/meshmon-companion
 git pull
 sudo ./install.sh --update
 ```
@@ -106,26 +159,20 @@ The installer discovers USB serial candidates from:
 - `/dev/ttyACM*`
 - `/dev/ttyUSB*`
 
-Stable `/dev/serial/by-id/` paths are preferred. If no device is found, installation stops with troubleshooting guidance. If multiple devices are found, the installer prompts for selection.
+Stable `/dev/serial/by-id/` paths are preferred. If no device is found,
+installation stops with troubleshooting guidance. If multiple devices are found,
+the installer prompts for selection.
 
-The wizard can also use an existing TCP serial bridge or skip node detection so configuration can be completed later.
-
-## Access Modes
-
-MeshMonCompanion is designed around safe admin exposure:
-
-- Tailscale-only when Tailscale is installed and selected
-- Localhost-only as the safest non-Tailscale default
-- LAN-only when explicitly selected
-- All interfaces only when explicitly selected and understood
-
-The serial bridge should remain Docker-internal unless the user explicitly opts into host exposure.
+The wizard can also use an existing TCP serial bridge or skip node detection so
+configuration can be completed later.
 
 ## Optional Tailscale and Wi-Fi
 
-The installer can optionally install/configure Tailscale using the official Tailscale install flow. It does not store Tailscale auth keys.
+The installer can optionally install/configure Tailscale using the official
+Tailscale install flow. It does not store Tailscale auth keys.
 
-The installer can optionally configure Wi-Fi when NetworkManager and `nmcli` are available. Wi-Fi passwords are not printed in logs by the installer.
+The installer can optionally configure Wi-Fi when NetworkManager and `nmcli` are
+available. Wi-Fi passwords are not printed in logs by the installer.
 
 ## MQTT
 
@@ -136,7 +183,9 @@ local generated config and the password/token is written to a root-owned secret
 file with restrictive permissions. MQTT rebroadcasting shows an explicit
 warning because it can increase mesh traffic and affect battery or solar nodes.
 
-MQTT configuration storage is present in this bootstrapper. Runtime integration should be verified for each MeshMonitor deployment before enabling MQTT-related features in production.
+MQTT configuration storage is present in this bootstrapper. Runtime integration
+should be verified for each MeshMonitor deployment before enabling MQTT-related
+features in production.
 
 ## Backups and Restore
 
@@ -146,35 +195,8 @@ Backups go under:
 /opt/meshmon-companion/backups
 ```
 
-Backups include a manifest and exclude known secret paths by default. Restore supports dry-run and must create a pre-restore backup before destructive restore.
-
-## Security Model
-
-The web app runs as a low-privilege `meshmon` service user. It can call only
-whitelisted scripts through exact sudoers entries. There is no raw terminal,
-generic service manager, unrestricted file browser, or arbitrary command
-execution.
-
-## Commands
-
-```bash
-meshmon-companion status
-companion-menu
-meshmon-companion menu
-meshmon-companion health
-meshmon-companion doctor
-meshmon-companion doctor --privacy
-meshmon-companion backup
-meshmon-companion restore --dry-run BACKUP_FILE
-meshmon-companion diagnostics --privacy
-meshmon-companion update
-meshmon-companion uninstall
-```
-
-`doctor` prints a single troubleshooting report with config, service status,
-Docker containers, listening ports, URL checks, and recent logs. Use `--privacy`
-before sharing output publicly; it redacts IP addresses, MAC addresses, and
-obvious secret fields.
+Backups include a manifest and exclude known secret paths by default. Restore
+supports dry-run and must create a pre-restore backup before destructive restore.
 
 ## Example Values
 
