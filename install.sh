@@ -31,8 +31,11 @@ redact_install_log() {
   [[ -f "$LOG_FILE" ]] || return 0
   sed -E \
     -e 's#(/dev/serial/by-id/)usb-[^[:space:]]+#\1REDACTED#g' \
+    -e 's#https://login.tailscale.com/a/[A-Za-z0-9]+#https://login.tailscale.com/a/REDACTED#g' \
     -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/REDACTED-IP/g' \
     -e 's/([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}/REDACTED-MAC/g' \
+    -e 's/(hostname_label:).*/\1 REDACTED/g' \
+    -e 's/("hostname": ")[^"]+/\1REDACTED/g' \
     -e "s/(Wi-Fi SSID:).*/\1 REDACTED/" \
     -e "s/(Connecting to Wi-Fi SSID ')[^']+(')/\1REDACTED\2/g" \
     -e 's/^([*[:space:]]*)([^[:space:]].*[[:space:]]+[0-9]{1,3}[[:space:]]+(WPA|WEP|SAE|OWE|--).*)$/\1REDACTED-SSID/g' \
@@ -40,6 +43,44 @@ redact_install_log() {
     "$LOG_FILE" > "$redacted" || return 0
   chmod 600 "$redacted" 2>/dev/null || true
   printf '%s\n' "$redacted"
+}
+
+print_share_log_instructions() {
+  local redacted="$1"
+  printf '\n[%s] To share this redacted log manually:\n' "$PROJECT_NAME"
+  printf '  cat %q\n' "$redacted"
+  printf '[%s] Or open an issue and attach/paste it:\n' "$PROJECT_NAME"
+  printf '  https://github.com/%s/meshmon-companion/issues/new\n' "$OWNER"
+}
+
+offer_github_issue() {
+  local redacted="$1"
+  local answer issue_body
+  [[ -n "$redacted" && -f "$redacted" ]] || return 0
+  print_share_log_instructions "$redacted"
+  [[ -r /dev/tty ]] || return 0
+  printf '\nThis will upload the redacted log to a public GitHub issue.\n' > /dev/tty
+  printf 'Create a GitHub issue now? [y/N]: ' > /dev/tty
+  read -r answer < /dev/tty || return 0
+  case "$answer" in
+    y|Y|yes|YES) ;;
+    *) return 0 ;;
+  esac
+  if ! command -v gh >/dev/null 2>&1 || ! gh auth status -h github.com >/dev/null 2>&1; then
+    printf '[%s] GitHub CLI is not installed/authenticated; use the manual instructions above.\n' "$PROJECT_NAME"
+    return 0
+  fi
+  issue_body="/tmp/meshmon-companion-issue-$(date +%F_%H%M%S).md"
+  {
+    printf 'Installer failed. Redacted install log follows.\n\n'
+    printf '```text\n'
+    cat "$redacted"
+    printf '\n```\n'
+  } > "$issue_body"
+  gh issue create \
+    --repo "$OWNER/meshmon-companion" \
+    --title "Installer failed" \
+    --body-file "$issue_body" || true
 }
 
 finish_logging() {
@@ -59,6 +100,7 @@ finish_logging() {
       else
         tail -120 "$LOG_FILE" || true
       fi
+      offer_github_issue "$redacted"
     fi
   fi
   exit "$status"
