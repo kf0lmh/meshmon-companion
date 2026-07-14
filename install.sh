@@ -26,7 +26,46 @@ start_logging() {
   printf '[%s] Install log: %s\n' "$PROJECT_NAME" "$LOG_FILE"
 }
 
+redact_install_log() {
+  local redacted="${LOG_FILE%.log}.redacted.log"
+  [[ -f "$LOG_FILE" ]] || return 0
+  sed -E \
+    -e 's#(/dev/serial/by-id/)usb-[^[:space:]]+#\1REDACTED#g' \
+    -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/REDACTED-IP/g' \
+    -e 's/([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}/REDACTED-MAC/g' \
+    -e "s/(Wi-Fi SSID:).*/\1 REDACTED/" \
+    -e "s/(Connecting to Wi-Fi SSID ')[^']+(')/\1REDACTED\2/g" \
+    -e 's/^([*[:space:]]*)([^[:space:]].*[[:space:]]+[0-9]{1,3}[[:space:]]+(WPA|WEP|SAE|OWE|--).*)$/\1REDACTED-SSID/g' \
+    -e 's/(password|passwd|psk|authkey|token|secret)([[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1\2REDACTED/Ig' \
+    "$LOG_FILE" > "$redacted" || return 0
+  chmod 600 "$redacted" 2>/dev/null || true
+  printf '%s\n' "$redacted"
+}
+
+finish_logging() {
+  local status="$?"
+  local redacted=""
+  trap - EXIT
+  if [[ "${MESHMON_COMPANION_NO_LOG:-0}" != "1" && -f "$LOG_FILE" ]]; then
+    redacted="$(redact_install_log || true)"
+    if [[ -n "$redacted" ]]; then
+      printf '[%s] Redacted share log: %s\n' "$PROJECT_NAME" "$redacted"
+    fi
+    if [[ "$status" -ne 0 ]]; then
+      printf '\n[%s] Install failed with exit code %s.\n' "$PROJECT_NAME" "$status"
+      printf '[%s] Last 120 redacted log lines:\n' "$PROJECT_NAME"
+      if [[ -n "$redacted" && -f "$redacted" ]]; then
+        tail -120 "$redacted" || true
+      else
+        tail -120 "$LOG_FILE" || true
+      fi
+    fi
+  fi
+  exit "$status"
+}
+
 start_logging
+trap finish_logging EXIT
 
 usage() {
   cat <<'EOF'
