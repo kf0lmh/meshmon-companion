@@ -48,13 +48,17 @@ def vector_feature_detail(feature):
     priority = int(feature.get("priority") or 0)
     if kind == "place":
         return "base"
-    if kind in ("rail", "water", "waterway"):
+    if kind in ("rail", "water"):
         return "mid"
-    if priority >= 6:
+    if kind == "waterway":
+        return "high"
+    if priority >= 8:
         return "base"
-    if priority >= 4:
+    if priority >= 6:
         return "mid"
-    return "high"
+    if priority >= 4:
+        return "high"
+    return "max"
 
 
 def vector_feature_visible_at_detail(feature, detail):

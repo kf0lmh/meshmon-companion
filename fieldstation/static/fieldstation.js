@@ -651,10 +651,12 @@ function mapAspect(bounds) {
 
 function featureDetailLevel(feature) {
   if (feature.kind === 'place') return 'base';
-  if (feature.kind === 'rail' || feature.kind === 'water' || feature.kind === 'waterway') return 'mid';
-  if ((feature.priority || 0) >= 6) return 'base';
-  if ((feature.priority || 0) >= 4) return 'mid';
-  return 'high';
+  if (feature.kind === 'rail' || feature.kind === 'water') return 'mid';
+  if (feature.kind === 'waterway') return 'high';
+  if ((feature.priority || 0) >= 8) return 'base';
+  if ((feature.priority || 0) >= 6) return 'mid';
+  if ((feature.priority || 0) >= 4) return 'high';
+  return 'max';
 }
 
 function vectorDetailForScale() {
