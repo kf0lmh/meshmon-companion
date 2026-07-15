@@ -1,0 +1,3 @@
+# FieldStation hardware adapter dependencies.
+# Installed into /opt/meshmon-companion/.venv-fieldstation by install.sh.
+meshtastic==2.7.10

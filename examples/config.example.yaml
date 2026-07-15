@@ -1,4 +1,5 @@
-# Example-only MeshMonCompanion config. Copy to /etc/meshmon-companion/config.yaml.
+# Example-only FieldStation host config.
+# Current compatibility installs copy this shape to /etc/meshmon-companion/config.yaml.
 # Do not commit generated local configs or credentials.
 
 hostname_label: example-node
@@ -8,7 +9,19 @@ control_bind: 127.0.0.1
 ports:
   meshmonitor: 8080
   control_panel: 8090
+  fieldstation: 8091
   virtual_node: 4404
+
+fieldstation:
+  enabled: true
+  bind: 127.0.0.1
+  port: 8091
+  database: /opt/meshmon-companion/data/fieldstation/fieldstation.sqlite3
+  offline_map_path: /opt/meshmon-companion/data/fieldstation/maps
+  read_only_usb_enabled: true
+  serial_autodetect: true
+  adapter_cache_seconds: 30
+  read_timeout_seconds: 12
 
 serial:
   connection_type: usb

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_NAME="MeshMonCompanion"
+PROJECT_NAME="FieldStation"
 INSTALL_DIR="/opt/meshmon-companion"
 CONFIG_DIR="/etc/meshmon-companion"
 CONFIG_FILE="$CONFIG_DIR/config.yaml"
 SERVICE_USER="meshmon"
+FIELDSTATION_VENV="$INSTALL_DIR/.venv-fieldstation"
 OWNER="${MESHMON_COMPANION_OWNER:-kf0lmh}"
 REPO_URL="https://github.com/${OWNER}/meshmon-companion"
 SOURCE_DIR=""
@@ -111,7 +112,10 @@ trap finish_logging EXIT
 
 usage() {
   cat <<'EOF'
-MeshMonCompanion installer
+FieldStation installer
+
+Current installs use compatibility paths under /opt/meshmon-companion and
+/etc/meshmon-companion until a dedicated FieldStation path migration is tested.
 
 Usage:
   ./install.sh [--help] [--dry-run] [--uninstall] [--update] [--non-interactive]
@@ -257,22 +261,32 @@ detect_os() {
 }
 
 install_packages() {
+  if ! command -v curl >/dev/null 2>&1; then
+    run apt-get update
+    run apt-get install -y curl
+  fi
   if ! command -v docker >/dev/null 2>&1; then
-    log "Docker not found. Installing Docker using the official convenience script."
-    run sh -c 'curl -fsSL https://get.docker.com | sh'
+    log "Docker not found. Installing Docker for optional compatibility services."
+    run sh -c 'curl -fsSL https://get.docker.com | sh' || echo "Warning: Docker install failed; FieldStation can continue without the compatibility dashboard stack." >&2
   else
     log "Docker already installed."
   fi
-  if ! docker compose version >/dev/null 2>&1; then
-    log "Docker Compose plugin missing. Installing docker-compose-plugin if available."
+  if command -v docker >/dev/null 2>&1 && ! docker compose version >/dev/null 2>&1; then
+    log "Docker Compose plugin missing. Installing it for optional compatibility services."
     run apt-get update
-    run apt-get install -y docker-compose-plugin
+    run apt-get install -y docker-compose-plugin || echo "Warning: Docker Compose plugin install failed; FieldStation can continue without the compatibility dashboard stack." >&2
+  elif ! command -v docker >/dev/null 2>&1; then
+    echo "Warning: Docker is unavailable; skipping optional compatibility dashboard stack." >&2
   else
     log "Docker Compose plugin already installed."
   fi
   if ! command -v python3 >/dev/null 2>&1; then
     run apt-get update
     run apt-get install -y python3
+  fi
+  if ! python3 -m venv --help >/dev/null 2>&1; then
+    run apt-get update
+    run apt-get install -y python3-venv
   fi
   if ! command -v rsync >/dev/null 2>&1; then
     run apt-get update
@@ -328,7 +342,7 @@ choose_connection() {
     echo
     echo "Connection type:"
     echo "  1. USB serial node connected to this Pi - recommended"
-    echo "  2. Existing TCP serial bridge"
+    echo "  2. Existing compatibility TCP serial bridge"
     echo "  3. Skip detection for now"
     choice="$(ask "Choose connection type" "1")"
     case "$choice" in
@@ -345,8 +359,8 @@ choose_connection() {
       ;;
     tcp)
       SERIAL_DEVICE=""
-      TCP_HOST="$(ask "TCP serial bridge host" "")"
-      TCP_PORT="$(ask "TCP serial bridge port" "4403")"
+      TCP_HOST="$(ask "Compatibility TCP serial bridge host" "")"
+      TCP_PORT="$(ask "Compatibility TCP serial bridge port" "4403")"
       if [[ -z "$TCP_HOST" ]]; then
         echo "TCP host is required for TCP mode." >&2
         exit 1
@@ -506,9 +520,10 @@ write_config() {
   optional_wifi_setup
   optional_mqtt_setup
   HOSTNAME_LABEL="$(ask "Display name for this Pi" "example-node")"
-  MESH_PORT="$(choose_port "MeshMonitor port" "8080")"
-  CONTROL_PORT="$(choose_port "MeshMonCompanion control panel port" "8090")"
-  VIRTUAL_PORT="$(choose_port "MeshMonitor virtual node port" "4404")"
+  MESH_PORT="$(choose_port "Compatibility dashboard port" "8080")"
+  CONTROL_PORT="$(choose_port "FieldStation host control panel port" "8090")"
+  FIELDSTATION_PORT="$(choose_port "FieldStation port" "8091")"
+  VIRTUAL_PORT="$(choose_port "Compatibility virtual node port" "4404")"
   run mkdir -p "$CONFIG_DIR"
   cat > "$CONFIG_FILE" <<EOF
 hostname_label: $HOSTNAME_LABEL
@@ -517,7 +532,18 @@ control_bind: $CONTROL_BIND
 ports:
   meshmonitor: $MESH_PORT
   control_panel: $CONTROL_PORT
+  fieldstation: $FIELDSTATION_PORT
   virtual_node: $VIRTUAL_PORT
+fieldstation:
+  enabled: true
+  bind: $CONTROL_BIND
+  port: $FIELDSTATION_PORT
+  database: /opt/meshmon-companion/data/fieldstation/fieldstation.sqlite3
+  offline_map_path: /opt/meshmon-companion/data/fieldstation/maps
+  read_only_usb_enabled: true
+  serial_autodetect: true
+  adapter_cache_seconds: 30
+  read_timeout_seconds: 12
 serial:
   connection_type: $CONNECTION_TYPE
   device: $SERIAL_DEVICE
@@ -549,24 +575,57 @@ EOF
 
 install_files() {
   run useradd --system --home "$INSTALL_DIR" --shell /usr/sbin/nologin "$SERVICE_USER" 2>/dev/null || true
+  if getent group dialout >/dev/null 2>&1; then
+    run usermod -a -G dialout "$SERVICE_USER"
+  fi
+  if getent group tty >/dev/null 2>&1; then
+    run usermod -a -G tty "$SERVICE_USER"
+  fi
   run mkdir -p "$INSTALL_DIR" "$CONFIG_DIR"
-  run rsync -a --delete --exclude '.git' "$SOURCE_DIR"/ "$INSTALL_DIR"/
+  run rsync -a --delete --exclude '.git' --exclude 'data' --exclude 'backups' "$SOURCE_DIR"/ "$INSTALL_DIR"/
+  run mkdir -p "$INSTALL_DIR/data/fieldstation/maps"
   run chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
   run chown root:root "$INSTALL_DIR"/scripts/*.sh
   run chmod 755 "$INSTALL_DIR"/scripts/*.sh
   run install -o root -g root -m 0755 "$INSTALL_DIR/scripts/meshmon-companion.sh" /usr/local/bin/meshmon-companion
   run install -o root -g root -m 0755 "$INSTALL_DIR/scripts/companion-menu.sh" /usr/local/bin/companion-menu
   run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/meshmon-companion.service" /etc/systemd/system/meshmon-companion.service
+  run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/fieldstation.service" /etc/systemd/system/fieldstation.service
   run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/meshmon-companion-backup.service" /etc/systemd/system/meshmon-companion-backup.service
   run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/meshmon-companion-backup.timer" /etc/systemd/system/meshmon-companion-backup.timer
   run install -o root -g root -m 0440 "$INSTALL_DIR/sudoers/meshmon-companion" /etc/sudoers.d/meshmon-companion
 }
 
+install_fieldstation_venv() {
+  local requirements="$INSTALL_DIR/fieldstation/requirements.txt"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    log "Would create/update FieldStation Python environment at $FIELDSTATION_VENV"
+    run python3 -m venv "$FIELDSTATION_VENV"
+    run "$FIELDSTATION_VENV/bin/python" -m pip install --upgrade pip
+    run "$FIELDSTATION_VENV/bin/python" -m pip install -r "$requirements"
+    run chown -R "$SERVICE_USER:$SERVICE_USER" "$FIELDSTATION_VENV"
+    return
+  fi
+  if [[ ! -f "$requirements" ]]; then
+    echo "FieldStation requirements file is missing: $requirements" >&2
+    exit 1
+  fi
+  run python3 -m venv "$FIELDSTATION_VENV"
+  run "$FIELDSTATION_VENV/bin/python" -m pip install --upgrade pip
+  run "$FIELDSTATION_VENV/bin/python" -m pip install -r "$requirements"
+  run chown -R "$SERVICE_USER:$SERVICE_USER" "$FIELDSTATION_VENV"
+}
+
 render_compose() {
   run "$INSTALL_DIR/scripts/render-compose.sh"
+  run "$INSTALL_DIR/scripts/render-fieldstation-env.sh"
 }
 
 start_stack() {
+  if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+    log "Skipping optional compatibility Docker stack because Docker Compose is unavailable."
+    return
+  fi
   run sh -c "cd '$INSTALL_DIR' && docker compose up -d --remove-orphans"
 }
 
@@ -574,6 +633,8 @@ enable_services() {
   run systemctl daemon-reload
   run systemctl enable meshmon-companion.service
   run systemctl restart meshmon-companion.service
+  run systemctl enable fieldstation.service
+  run systemctl restart fieldstation.service
   run systemctl enable --now meshmon-companion-backup.timer
 }
 
@@ -616,28 +677,34 @@ meshmonitor_api_url() {
 wait_for_meshmonitor_api() {
   local url deadline
   [[ "$DRY_RUN" == "1" ]] && return
+  if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+    log "Skipping compatibility dashboard API wait because Docker Compose is unavailable."
+    return
+  fi
   url="$(meshmonitor_api_url)"
   deadline=$((SECONDS + 90))
-  log "Waiting for MeshMonitor API at $url"
+  log "Waiting for compatibility dashboard API at $url"
   while (( SECONDS < deadline )); do
     if curl -fsS --max-time 4 "$url" >/dev/null 2>&1; then
-      log "MeshMonitor API is responding."
+      log "Compatibility dashboard API is responding."
       return
     fi
     sleep 5
   done
-  echo "Warning: MeshMonitor API did not respond within 90 seconds; continuing." >&2
+  echo "Warning: Compatibility dashboard API did not respond within 90 seconds; continuing." >&2
 }
 
 print_install_summary() {
-  local control_bind access_mode mesh_port control_port display_host
+  local control_bind access_mode mesh_port control_port fieldstation_port display_host
   [[ "$DRY_RUN" == "1" ]] && return
   control_bind="$(config_value control_bind)"
   access_mode="$(config_value access_mode)"
   mesh_port="$(config_section_value ports meshmonitor)"
   control_port="$(config_section_value ports control_panel)"
+  fieldstation_port="$(config_section_value ports fieldstation)"
   mesh_port="${mesh_port:-8080}"
   control_port="${control_port:-8090}"
+  fieldstation_port="${fieldstation_port:-8091}"
   display_host="$control_bind"
   if [[ -z "$display_host" || "$display_host" == "0.0.0.0" ]]; then
     display_host="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -647,12 +714,17 @@ print_install_summary() {
   echo
   log "Install/update summary"
   echo "Access mode: ${access_mode:-unknown}"
-  echo "Control panel: http://${display_host}:${control_port}"
-  echo "MeshMonitor:   http://${display_host}:${mesh_port}"
+  echo "FieldStation:              http://${display_host}:${fieldstation_port}"
+  echo "Host control panel:        http://${display_host}:${control_port}"
+  echo "Compatibility dashboard:   http://${display_host}:${mesh_port}"
   echo "SSH menu:      companion-menu"
   echo
   echo "Docker stack:"
-  run sh -c "cd '$INSTALL_DIR' && docker compose ps"
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    run sh -c "cd '$INSTALL_DIR' && docker compose ps"
+  else
+    echo "Compatibility Docker stack skipped; Docker Compose is unavailable."
+  fi
   echo
   echo "Health:"
   run "$INSTALL_DIR/scripts/healthcheck.sh" --json || true
@@ -663,8 +735,9 @@ uninstall() {
   need_root
   log "Uninstalling services. Backups and config are left in place unless removed manually."
   run sh -c "cd '$INSTALL_DIR' && docker compose down" 2>/dev/null || true
-  run systemctl disable --now meshmon-companion.service meshmon-companion-backup.timer 2>/dev/null || true
-  run rm -f /etc/systemd/system/meshmon-companion.service /etc/systemd/system/meshmon-companion-backup.service /etc/systemd/system/meshmon-companion-backup.timer
+  run systemctl disable --now meshmon-companion.service fieldstation.service meshmon-companion-backup.timer 2>/dev/null || true
+  run rm -f /etc/systemd/system/meshmon-companion.service /etc/systemd/system/fieldstation.service /etc/systemd/system/meshmon-companion-backup.service /etc/systemd/system/meshmon-companion-backup.timer
+  run rm -f /etc/default/fieldstation
   run rm -f /etc/sudoers.d/meshmon-companion /usr/local/bin/meshmon-companion /usr/local/bin/companion-menu
   run systemctl daemon-reload
 }
@@ -679,6 +752,7 @@ main() {
   install_packages
   prepare_source
   install_files
+  install_fieldstation_venv
   write_config
   render_compose
   start_stack

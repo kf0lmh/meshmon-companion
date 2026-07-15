@@ -15,12 +15,17 @@ BIND = os.environ.get("MESHMON_COMPANION_BIND", "127.0.0.1")
 def run_script(name, *args, timeout=60, sudo=False):
     cmd = [str(SCRIPTS / name), *args]
     if sudo:
-        cmd = ["sudo", *cmd]
-    return subprocess.run(cmd, text=True, capture_output=True, timeout=timeout)
+        cmd = ["sudo", "-n", *cmd]
+    try:
+        return subprocess.run(cmd, text=True, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(cmd, 124, exc.stdout or "", exc.stderr or "Command timed out")
 
 
 def health():
     result = run_script("healthcheck.sh", "--json", timeout=15, sudo=True)
+    if result.returncode != 0 and "sudo:" in (result.stderr or ""):
+        result = run_script("healthcheck.sh", "--json", timeout=15, sudo=False)
     if result.returncode != 0:
         return {"overall": "critical", "errors": [result.stderr or result.stdout], "warnings": []}
     return json.loads(result.stdout)
@@ -49,7 +54,33 @@ def metric_card(label, value, tone=""):
     return f"<article class='metric{tone_class}'><span>{esc(label)}</span><strong>{esc(value)}</strong></article>"
 
 
-def render_home(data):
+def host_without_port(value):
+    if not value:
+        return ""
+    return value.rsplit(":", 1)[0] if ":" in value and not value.startswith("[") else value
+
+
+def default_fieldstation_link(request_host=""):
+    host = host_without_port(request_host) or BIND
+    if host in ("", "0.0.0.0", "::"):
+        host = "127.0.0.1"
+    return f"http://{host}:8091"
+
+
+def fieldstation_link_for(data, request_host=""):
+    fieldstation_url = nested(data, "services", "fieldstation_url", default="")
+    if not fieldstation_url:
+        return default_fieldstation_link(request_host)
+    parsed = urllib.parse.urlparse(fieldstation_url)
+    host = parsed.hostname or ""
+    request_name = host_without_port(request_host)
+    if host in ("127.0.0.1", "localhost") and request_name and request_name not in ("127.0.0.1", "localhost"):
+        host = request_name
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme or 'http'}://{host}{port}"
+
+
+def render_home(data, request_host=""):
     overall = str(data.get("overall", "unknown"))
     mesh_url = nested(data, "services", "meshmonitor_url", default="")
     mesh_link = mesh_url.rsplit("/api/status", 1)[0] if mesh_url else ""
@@ -58,6 +89,9 @@ def render_home(data):
     docker = nested(data, "services", "docker", default="unknown")
     control = nested(data, "services", "control_panel", default="unknown")
     mesh_api = nested(data, "services", "meshmonitor_api", default="unknown")
+    fieldstation = nested(data, "services", "fieldstation", default="unknown")
+    fieldstation_api = nested(data, "services", "fieldstation_api", default="unknown")
+    fieldstation_link = fieldstation_link_for(data, request_host)
     serial = "Present" if nested(data, "serial", "present", default=False) else "Not detected"
     throttled = nested(data, "power", "throttled", default="")
     power = "Good" if throttled in ("", "throttled=0x0") else "Check power"
@@ -69,21 +103,24 @@ def render_home(data):
         items = "".join(f"<li>{esc(item)}</li>" for item in [*errors, *warnings])
         issue_items = f"<section class='notice'><h2>Needs Attention</h2><ul>{items}</ul></section>"
 
-    mesh_button = f"<a class='button primary' href='{esc(mesh_link)}'>Open MeshMonitor</a>" if mesh_link else ""
+    fieldstation_button = f"<a class='button primary' href='{esc(fieldstation_link)}'>Open FieldStation</a>" if fieldstation_link else ""
+    mesh_button = f"<a class='button' href='{esc(mesh_link)}'>Open Compatibility Dashboard</a>" if mesh_link else ""
     raw_status = esc(json.dumps(data, indent=2))
 
     return f"""
       <section class='hero'>
         <div>
-          <p class='eyebrow'>MeshMonCompanion</p>
+          <p class='eyebrow'>FieldStation Host</p>
           <h1>{esc(nested(data, "system", "hostname", default="Node"))}</h1>
-          <p class='subtle'>Control panel and health monitor for this MeshMonitor node.</p>
+          <p class='subtle'>Local service and health monitor for this FieldStation host.</p>
         </div>
         <p class='status {esc(overall)}'>{esc(overall).title()}</p>
       </section>
 
       <section class='metrics'>
-        {metric_card("MeshMonitor", service_label(mesh_api), "good" if mesh_api == "ok" else "bad")}
+        {metric_card("Compatibility Dashboard", service_label(mesh_api), "good" if mesh_api == "ok" else "bad")}
+        {metric_card("FieldStation", service_label(fieldstation_api), "good" if fieldstation_api == "ok" else "warn")}
+        {metric_card("FieldStation Service", service_label(fieldstation), "good" if fieldstation == "active" else "warn")}
         {metric_card("Serial Node", serial, "good" if serial == "Present" else "warn")}
         {metric_card("Docker", service_label(docker), "good" if docker == "active" else "bad")}
         {metric_card("Control Panel", service_label(control), "good" if control == "active" else "bad")}
@@ -101,6 +138,7 @@ def render_home(data):
           <a href='/api/status'>Raw status</a>
         </div>
         <nav class='quick-links'>
+          {fieldstation_button}
           {mesh_button}
           <a class='button' href='/backups'>Backups</a>
         </nav>
@@ -109,10 +147,10 @@ def render_home(data):
       <section class='actions-panel'>
         <h2>Controls</h2>
         <form class='actions' method='post'>
-          <button formaction='/action/restart-meshmonitor'>Restart MeshMonitor</button>
-          <button formaction='/action/restart-serial-bridge'>Restart Serial Bridge</button>
+          <button formaction='/action/restart-meshmonitor'>Restart Compatibility Dashboard</button>
+          <button formaction='/action/restart-serial-bridge'>Restart Compatibility Serial Bridge</button>
           <button formaction='/action/restart-control-panel'>Restart Control Panel</button>
-          <button formaction='/action/restart-mesh-stack' onclick="return confirm('Restart the full mesh stack?')">Restart Full Stack</button>
+          <button formaction='/action/restart-mesh-stack' onclick="return confirm('Restart the compatibility stack?')">Restart Compatibility Stack</button>
           <button formaction='/action/restart-tailscale' onclick="return confirm('Restart Tailscale? This may interrupt remote access.')">Restart Tailscale</button>
           <button class='danger' formaction='/action/reboot-pi' onclick="return confirm('Reboot this Pi now?')">Reboot Pi</button>
         </form>
@@ -131,7 +169,7 @@ def page(body):
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MeshMonCompanion</title>
+  <title>FieldStation Host</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body><main>{body}</main></body>
@@ -172,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path == "/":
             data = health()
-            self.send_html(page(render_home(data)))
+            self.send_html(page(render_home(data, self.headers.get("Host", ""))))
         elif path == "/api/status":
             self.send_json(health())
         elif path == "/backups":
@@ -246,7 +284,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     server = ThreadingHTTPServer((BIND, PORT), Handler)
-    print(f"MeshMonCompanion listening on http://{BIND}:{PORT}", flush=True)
+    print(f"FieldStation host control listening on http://{BIND}:{PORT}", flush=True)
     server.serve_forever()
 
 

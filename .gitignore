@@ -6,15 +6,22 @@
 *.p12
 *.pfx
 *.log
+*.sqlite3
+*.sqlite3-*
+*.db-*
 *.tar
 *.tar.gz
 *.zip
 backups/
 logs/
 runtime/
+diagnostics/
+diagnostic-bundles/
 tmp/
 config/local.yaml
 config/generated.yaml
+*.local.yaml
+*.generated.yaml
 *.sqlite
 *.db
 tailscale-state/
@@ -22,3 +29,4 @@ NetworkManager/
 system-connections/
 __pycache__/
 *.pyc
+.venv*/
