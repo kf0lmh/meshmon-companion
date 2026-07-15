@@ -49,7 +49,7 @@ Current FieldStation scaffold provides:
   `4 Logistics`, `5 Relay`, `6 Tactical`, `7 Test`.
 - Local message storage with explicit status events and operator cancellation
   for queued local messages.
-- An offline map view that can use an installer-downloaded local raster tile
+- An offline map view that can use an installer-downloaded local vector map
   package, falling back to a clearly labeled coordinate placeholder.
 - Local waypoint storage, editing, status tracking, and queued waypoint sharing.
 - Pending received waypoint parsing from human-readable waypoint messages.
@@ -117,7 +117,7 @@ Phase 3 map and waypoint behavior:
 
 - The map screen is offline-only. During first interactive install, the
   installer asks for a map center location/address and radius, then downloads a
-  bounded local OpenStreetMap raster tile package under
+  bounded local OpenStreetMap vector map package under
   `/opt/meshmon-companion/data/fieldstation/maps`.
 - If no package is configured or the download fails, FieldStation falls back to
   a clearly labeled coordinate placeholder.

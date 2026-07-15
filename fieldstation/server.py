@@ -107,6 +107,24 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_map_vector(self):
+        path = OFFLINE_MAP_PATH / "vector_map.json"
+        try:
+            resolved = path.resolve()
+            root = OFFLINE_MAP_PATH.resolve()
+        except OSError:
+            self.send_json({"error": "Map vector package not found"}, 404)
+            return
+        if root not in resolved.parents or not resolved.exists():
+            self.send_json({"error": "Map vector package not found"}, 404)
+            return
+        try:
+            data = json.loads(resolved.read_text())
+        except (OSError, json.JSONDecodeError):
+            self.send_json({"error": "Map vector package is unreadable"}, 500)
+            return
+        self.send_json(data)
+
     def read_json_body(self):
         length = int(self.headers.get("Content-Length", "0") or "0")
         if not length:
@@ -159,6 +177,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(repo.map_status())
         elif path == "/api/map/tile":
             self.send_map_tile(query)
+        elif path == "/api/map/vector":
+            self.send_map_vector()
         elif path == "/api/positions":
             repo = self.repo_or_503()
             if repo:

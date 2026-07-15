@@ -18,8 +18,8 @@ while [[ $# -gt 0 ]]; do
       cat <<'EOF'
 Usage: download-fieldstation-map.sh --location LOCATION --radius-miles MILES [--out DIR]
 
-Downloads a bounded local OpenStreetMap raster tile package for FieldStation.
-The package is stored under DIR with a manifest.json and README.
+Downloads a bounded local vector map package for FieldStation.
+The package is stored under DIR with manifest.json, vector_map.json, and README.md.
 EOF
       exit 0
       ;;
@@ -55,21 +55,24 @@ if zoom_min < 0 or zoom_max < zoom_min or zoom_max > 16:
     raise SystemExit("Zoom range must be ordered and no higher than 16.")
 
 out = Path(out_text)
-tiles_root = out / "tiles" / "osm"
 manifest_path = out / "manifest.json"
+vector_path = out / "vector_map.json"
 readme_path = out / "README.md"
 agent = "FieldStation offline map installer (https://github.com/kf0lmh/meshmon-companion)"
 
-def fetch_json(url):
-    request = urllib.request.Request(url, headers={"User-Agent": agent})
-    with urllib.request.urlopen(request, timeout=30) as response:
+def fetch_json(url, data=None, timeout=60):
+    headers = {"User-Agent": agent}
+    if data is not None:
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    request = urllib.request.Request(url, data=data, headers=headers)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
 query_args = {"format": "jsonv2", "limit": "1", "q": location}
 if re.fullmatch(r"\d{5}(-\d{4})?", location.strip()):
     query_args["countrycodes"] = "us"
 query = urllib.parse.urlencode(query_args)
-matches = fetch_json(f"https://nominatim.openstreetmap.org/search?{query}")
+matches = fetch_json(f"https://nominatim.openstreetmap.org/search?{query}", timeout=30)
 if not matches:
     raise SystemExit(f"Could not find map center for: {location}")
 
@@ -88,81 +91,129 @@ bounds = {
     "center_longitude": lon,
 }
 
-def lon_to_tile_x(value, zoom):
-    return int((value + 180.0) / 360.0 * (2 ** zoom))
+south, west, north, east = bounds["south"], bounds["west"], bounds["north"], bounds["east"]
+overpass_query = f"""
+[out:json][timeout:180];
+(
+  way["highway"~"motorway|trunk|primary|secondary|tertiary|unclassified|residential"]({south},{west},{north},{east});
+  way["waterway"~"river|stream|canal"]({south},{west},{north},{east});
+  way["railway"~"rail|light_rail"]({south},{west},{north},{east});
+  way["natural"="water"]({south},{west},{north},{east});
+  node["place"~"city|town|village|hamlet"]({south},{west},{north},{east});
+);
+out tags geom;
+""".strip()
 
-def lat_to_tile_y(value, zoom):
-    rad = math.radians(value)
-    return int((1.0 - math.asinh(math.tan(rad)) / math.pi) / 2.0 * (2 ** zoom))
-
-jobs = []
-for zoom in range(zoom_min, zoom_max + 1):
-    x_min = lon_to_tile_x(bounds["west"], zoom)
-    x_max = lon_to_tile_x(bounds["east"], zoom)
-    y_min = lat_to_tile_y(bounds["north"], zoom)
-    y_max = lat_to_tile_y(bounds["south"], zoom)
-    for x in range(min(x_min, x_max), max(x_min, x_max) + 1):
-        for y in range(min(y_min, y_max), max(y_min, y_max) + 1):
-            jobs.append((zoom, x, y))
-
-max_tiles = 1200
-if len(jobs) > max_tiles:
-    kept = []
-    for job in jobs:
-        if job[0] < zoom_max:
-            kept.append(job)
-    jobs = kept
-    zoom_max -= 1
-if len(jobs) > max_tiles:
-    raise SystemExit(f"Requested area is too large for installer download ({len(jobs)} tiles). Use a smaller radius.")
-
-downloaded = 0
-skipped = 0
+endpoints = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+]
+raw = None
 errors = []
-for zoom, x, y in jobs:
-    target = tiles_root / str(zoom) / str(x) / f"{y}.png"
-    if target.exists() and target.stat().st_size > 0:
-        skipped += 1
-        continue
-    target.parent.mkdir(parents=True, exist_ok=True)
-    url = f"https://tile.openstreetmap.org/{zoom}/{x}/{y}.png"
-    request = urllib.request.Request(url, headers={"User-Agent": agent})
+for endpoint in endpoints:
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            target.write_bytes(response.read())
-        downloaded += 1
-        time.sleep(0.08)
+        raw = fetch_json(endpoint, data=overpass_query.encode(), timeout=240)
+        break
     except urllib.error.HTTPError as exc:
-        errors.append(f"{zoom}/{x}/{y}: HTTP {exc.code}")
+        errors.append(f"{endpoint}: HTTP {exc.code}")
     except Exception as exc:
-        errors.append(f"{zoom}/{x}/{y}: {exc}")
+        errors.append(f"{endpoint}: {exc}")
+if raw is None:
+    raise SystemExit("Could not download vector map data: " + "; ".join(errors))
 
+ROAD_PRIORITY = {
+    "motorway": 10,
+    "trunk": 9,
+    "primary": 8,
+    "secondary": 7,
+    "tertiary": 6,
+    "unclassified": 4,
+    "residential": 3,
+}
+
+def simplify(points, max_points):
+    if len(points) <= max_points:
+        return points
+    step = max(1, math.ceil(len(points) / max_points))
+    result = points[::step]
+    if result[-1] != points[-1]:
+        result.append(points[-1])
+    return result
+
+def clean_tags(tags):
+    return {key: str(tags[key])[:120] for key in ("name", "highway", "waterway", "railway", "natural", "place") if key in tags}
+
+features = []
+for element in raw.get("elements", []):
+    tags = element.get("tags") or {}
+    if element.get("type") == "node":
+        place = tags.get("place")
+        if place:
+            features.append(
+                {
+                    "kind": "place",
+                    "priority": {"city": 10, "town": 8, "village": 6, "hamlet": 4}.get(place, 1),
+                    "label": tags.get("name", place)[:80],
+                    "point": [element.get("lon"), element.get("lat")],
+                    "tags": clean_tags(tags),
+                }
+            )
+        continue
+    geometry = element.get("geometry") or []
+    points = [[item.get("lon"), item.get("lat")] for item in geometry if item.get("lon") is not None and item.get("lat") is not None]
+    if len(points) < 2:
+        continue
+    highway = tags.get("highway")
+    waterway = tags.get("waterway")
+    railway = tags.get("railway")
+    natural = tags.get("natural")
+    if highway:
+        priority = ROAD_PRIORITY.get(highway, 1)
+        features.append({"kind": "road", "priority": priority, "points": simplify(points, 80), "tags": clean_tags(tags)})
+    elif waterway:
+        features.append({"kind": "waterway", "priority": 7, "points": simplify(points, 100), "tags": clean_tags(tags)})
+    elif railway:
+        features.append({"kind": "rail", "priority": 6, "points": simplify(points, 100), "tags": clean_tags(tags)})
+    elif natural == "water":
+        features.append({"kind": "water", "priority": 5, "points": simplify(points, 140), "tags": clean_tags(tags)})
+
+features.sort(key=lambda item: (item.get("priority", 0), len(item.get("points", []))), reverse=True)
+max_features = 6500
+features = features[:max_features]
+if not features:
+    raise SystemExit("Downloaded map data did not contain usable local features.")
+
+vector_doc = {
+    "format": "fieldstation-offline-vector-map-v1",
+    "bounds": bounds,
+    "features": features,
+}
 manifest = {
-    "format": "fieldstation-offline-raster-tiles-v1",
+    "format": "fieldstation-offline-vector-map-v1",
     "location": location,
     "display_name": match.get("display_name", location),
     "radius_miles": radius_miles,
     "zoom_min": zoom_min,
     "zoom_max": zoom_max,
     "bounds": bounds,
-    "source": "OpenStreetMap raster tiles",
-    "attribution": "Map data and tiles copyright OpenStreetMap contributors",
+    "source": "OpenStreetMap vector data via Overpass",
+    "attribution": "Map data copyright OpenStreetMap contributors",
     "internet_required_at_runtime": False,
-    "tile_path": "tiles/osm/{z}/{x}/{y}.png",
-    "tiles_requested": len(jobs),
-    "tiles_downloaded": downloaded,
-    "tiles_reused": skipped,
-    "errors": errors[:25],
+    "vector_path": "vector_map.json",
+    "features_downloaded": len(features),
+    "raw_elements_seen": len(raw.get("elements", [])),
+    "errors": errors,
     "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
 }
+vector_path.write_text(json.dumps(vector_doc, separators=(",", ":")) + "\n")
 manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 readme_path.write_text(
     "# FieldStation Offline Map Package\n\n"
     f"Location: {manifest['display_name']}\n\n"
     f"Radius: {radius_miles} miles\n\n"
-    f"Zooms: {zoom_min}-{zoom_max}\n\n"
+    f"Features: {len(features)}\n\n"
     "Runtime internet is not required for this package. Attribution: Map data "
-    "and tiles copyright OpenStreetMap contributors.\n"
+    "copyright OpenStreetMap contributors.\n"
 )
-print(json.dumps({"manifest": str(manifest_path), "tiles_downloaded": downloaded, "tiles_reused": skipped, "errors": len(errors)}))
+print(json.dumps({"manifest": str(manifest_path), "features_downloaded": len(features), "raw_elements_seen": len(raw.get("elements", [])), "errors": len(errors)}))
 PY

@@ -106,6 +106,7 @@ def page():
         <div id="offlineMap" class="offline-map" role="img" aria-label="Offline map">
           <div id="mapPanLayer" class="map-pan-layer">
             <div id="mapTiles" class="map-tiles"></div>
+            <svg id="mapVector" class="map-vector" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"></svg>
             <div class="map-grid"></div>
             <div id="nodeMarkers" class="marker-layer"></div>
             <div id="waypointMarkers" class="marker-layer"></div>

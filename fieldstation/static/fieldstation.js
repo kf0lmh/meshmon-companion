@@ -74,6 +74,7 @@ const els = {
   offlineMap: document.getElementById('offlineMap'),
   mapPanLayer: document.getElementById('mapPanLayer'),
   mapTiles: document.getElementById('mapTiles'),
+  mapVector: document.getElementById('mapVector'),
   mapZoomIn: document.getElementById('mapZoomIn'),
   mapZoomOut: document.getElementById('mapZoomOut'),
   mapReset: document.getElementById('mapReset'),
@@ -348,12 +349,16 @@ function populateWaypointOptions() {
 
 function renderMapStatus(status) {
   state.mapStatus = status;
-  const mapMode = status.tiles === 'local_raster' ? 'offline map package installed' : 'coordinate plot placeholder';
+  const mapMode = status.tiles === 'local_vector'
+    ? 'offline vector map installed'
+    : (status.tiles === 'local_raster' ? 'offline map package installed' : 'coordinate plot placeholder');
   els.mapModeText.textContent = `${status.region} | ${mapMode} | no runtime internet tiles`;
-  els.mapLabel.textContent = status.tiles === 'local_raster' ? 'Offline map' : 'Coordinate plot - not a map';
-  els.mapNote.textContent = status.tiles === 'local_raster'
-    ? 'Local offline map tiles are installed for this area.'
-    : 'This is only a coordinate plot against rough regional bounds. It is not a street, topo, or parcel map.';
+  els.mapLabel.textContent = status.tiles === 'placeholder' ? 'Coordinate plot - not a map' : 'Offline map';
+  els.mapNote.textContent = status.tiles === 'local_vector'
+    ? 'Local offline vector map data is installed for this area.'
+    : (status.tiles === 'local_raster'
+      ? 'Local offline map tiles are installed for this area.'
+      : 'This is only a coordinate plot against rough regional bounds. It is not a street, topo, or parcel map.');
   renderMapTiles(status);
   populateWaypointOptions();
 }
@@ -396,6 +401,36 @@ function renderMapTiles(status) {
       els.mapTiles.appendChild(img);
     }
   }
+}
+
+function renderMapVector(vector) {
+  els.mapVector.replaceChildren();
+  if (!vector || !Array.isArray(vector.features)) return;
+  const bounds = vector.bounds || state.mapStatus?.bounds;
+  if (!bounds) return;
+  const lineGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  const labelGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  els.mapVector.append(lineGroup, labelGroup);
+  vector.features.forEach((feature) => {
+    if (feature.kind === 'place' && feature.point) {
+      const point = projectMapPoint(feature.point[1], feature.point[0], bounds);
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('x', point.x);
+      text.setAttribute('y', point.y);
+      text.setAttribute('class', `map-feature-label priority-${Math.min(10, feature.priority || 1)}`);
+      text.textContent = feature.label || feature.tags?.name || '';
+      labelGroup.appendChild(text);
+      return;
+    }
+    if (!Array.isArray(feature.points) || feature.points.length < 2) return;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', feature.points.map((item, index) => {
+      const point = projectMapPoint(item[1], item[0], bounds);
+      return `${index === 0 ? 'M' : 'L'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`;
+    }).join(' '));
+    path.setAttribute('class', `map-feature ${feature.kind} priority-${Math.min(10, feature.priority || 1)}`);
+    lineGroup.appendChild(path);
+  });
 }
 
 function applyMapTransform() {
@@ -549,11 +584,19 @@ function renderPendingWaypoints(items) {
 
 function projectPoint(latitude, longitude) {
   const bounds = state.mapStatus?.bounds || {north: 39.38, south: 38.86, west: -91.28, east: -90.58};
+  const point = projectMapPoint(latitude, longitude, bounds);
+  return {
+    x: Math.min(96, Math.max(4, point.x / 10)),
+    y: Math.min(94, Math.max(6, point.y / 10)),
+  };
+}
+
+function projectMapPoint(latitude, longitude, bounds) {
   const x = ((Number(longitude) - bounds.west) / (bounds.east - bounds.west)) * 100;
   const y = ((bounds.north - Number(latitude)) / (bounds.north - bounds.south)) * 100;
   return {
-    x: Math.min(96, Math.max(4, x)),
-    y: Math.min(94, Math.max(6, y)),
+    x: Math.min(1000, Math.max(0, x * 10)),
+    y: Math.min(1000, Math.max(0, y * 10)),
   };
 }
 
@@ -865,7 +908,17 @@ async function loadEvents() {
 }
 
 async function loadMapStatus() {
-  renderMapStatus(await api('/api/map/status'));
+  const status = await api('/api/map/status');
+  renderMapStatus(status);
+  if (status.tiles === 'local_vector') {
+    try {
+      renderMapVector(await api('/api/map/vector'));
+    } catch (error) {
+      els.mapVector.replaceChildren();
+    }
+  } else {
+    els.mapVector.replaceChildren();
+  }
 }
 
 async function loadPositions() {

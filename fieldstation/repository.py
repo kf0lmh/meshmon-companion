@@ -442,11 +442,13 @@ class FieldStationRepository:
         manifest = self._offline_map_manifest(map_path)
         bounds = manifest.get("bounds") if manifest else LINCOLN_COUNTY_BOUNDS
         region = manifest.get("display_name") or manifest.get("location") if manifest else "Lincoln County, Missouri"
+        vector_features = int(manifest.get("features_downloaded", 0) or 0) if manifest else 0
         tiles_downloaded = int(manifest.get("tiles_downloaded", 0) or 0) + int(manifest.get("tiles_reused", 0) or 0) if manifest else 0
+        has_vector = vector_features > 0 and bool(manifest.get("vector_path"))
         return {
             "region": region,
-            "mode": "offline_tiles" if tiles_downloaded else "offline_placeholder",
-            "tiles": "local_raster" if tiles_downloaded else "placeholder",
+            "mode": "offline_vector" if has_vector else ("offline_tiles" if tiles_downloaded else "offline_placeholder"),
+            "tiles": "local_vector" if has_vector else ("local_raster" if tiles_downloaded else "placeholder"),
             "asset_path": str(map_path),
             "internet_required": False,
             "live_node_positions": False,
@@ -454,7 +456,7 @@ class FieldStationRepository:
             "map_package": manifest,
             "waypoint_types": list(WAYPOINT_TYPES),
             "waypoint_statuses": list(WAYPOINT_STATUSES),
-            "detail": "Offline local map package is installed." if tiles_downloaded else "Offline placeholder map surface. Add/download a local map package for a basemap.",
+            "detail": "Offline local vector map package is installed." if has_vector else ("Offline local map package is installed." if tiles_downloaded else "Offline placeholder map surface. Add/download a local map package for a basemap."),
         }
 
     def _offline_map_manifest(self, map_path):

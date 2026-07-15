@@ -535,7 +535,7 @@ choose_offline_map_area() {
   fi
   echo
   echo "Offline map package:"
-  echo "FieldStation can download a local OpenStreetMap raster tile package during install."
+  echo "FieldStation can download a local OpenStreetMap vector map package during install."
   echo "Leave location blank to skip this for now."
   MAP_LOCATION="$(ask "Map center location/address" "")"
   if [[ -z "$MAP_LOCATION" ]]; then
