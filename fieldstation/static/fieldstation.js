@@ -595,8 +595,8 @@ function projectMapPoint(latitude, longitude, bounds) {
   const x = ((Number(longitude) - bounds.west) / (bounds.east - bounds.west)) * 100;
   const y = ((bounds.north - Number(latitude)) / (bounds.north - bounds.south)) * 100;
   return {
-    x: Math.min(1000, Math.max(0, x * 10)),
-    y: Math.min(1000, Math.max(0, y * 10)),
+    x: x * 10,
+    y: y * 10,
   };
 }
 
