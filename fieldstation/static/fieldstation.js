@@ -11,7 +11,8 @@ const state = {
   netLogEntries: [],
   mapVectorDetail: '',
   mapVectorLoading: '',
-  mapView: {scale: 1, x: 0, y: 0, dragging: false, dragStartX: 0, dragStartY: 0, startX: 0, startY: 0},
+  mapVector: null,
+  mapView: {zoom: 1, centerX: null, centerY: null, dragging: false, dragStartX: 0, dragStartY: 0, startCenterX: 0, startCenterY: 0},
 };
 
 const NET_ENTRY_TYPES = [
@@ -76,7 +77,7 @@ const els = {
   offlineMap: document.getElementById('offlineMap'),
   mapPanLayer: document.getElementById('mapPanLayer'),
   mapTiles: document.getElementById('mapTiles'),
-  mapVector: document.getElementById('mapVector'),
+  mapCanvas: document.getElementById('mapCanvas'),
   mapZoomIn: document.getElementById('mapZoomIn'),
   mapZoomOut: document.getElementById('mapZoomOut'),
   mapReset: document.getElementById('mapReset'),
@@ -407,120 +408,193 @@ function renderMapTiles(status) {
 }
 
 function renderMapVector(vector) {
-  els.mapVector.replaceChildren();
-  if (!vector || !Array.isArray(vector.features)) return;
-  const bounds = vector.bounds || state.mapStatus?.bounds;
-  if (!bounds) return;
-  const lineGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  const labelGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  els.mapVector.append(lineGroup, labelGroup);
+  state.mapVector = vector || null;
+  if (vector?.bounds && (state.mapView.centerX === null || state.mapView.centerY === null)) {
+    resetMapView();
+  }
+  renderMapCanvas();
+}
+
+function renderMapCanvas() {
+  const canvas = els.mapCanvas;
+  const rect = els.offlineMap.getBoundingClientRect();
+  if (!canvas || !rect.width || !rect.height) return;
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  canvas.width = Math.round(rect.width * dpr);
+  canvas.height = Math.round(rect.height * dpr);
+  canvas.style.width = `${rect.width}px`;
+  canvas.style.height = `${rect.height}px`;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  drawMapBackground(ctx, rect.width, rect.height);
+  const vector = state.mapVector;
+  if (!vector || !Array.isArray(vector.features)) {
+    updateMapMarkers();
+    return;
+  }
+  const viewport = currentMapViewport();
+  const lines = [];
+  const labels = [];
   vector.features.forEach((feature) => {
-    if (feature.kind === 'place' && feature.point) {
-      const point = projectMapPoint(feature.point[1], feature.point[0], bounds);
-      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      text.setAttribute('x', point.x);
-      text.setAttribute('y', point.y);
-      text.setAttribute('class', `map-feature-label priority-${Math.min(10, feature.priority || 1)}`);
-      text.textContent = feature.label || feature.tags?.name || '';
-      labelGroup.appendChild(text);
-      return;
-    }
-    if (!Array.isArray(feature.points) || feature.points.length < 2) return;
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', feature.points.map((item, index) => {
-      const point = projectMapPoint(item[1], item[0], bounds);
-      return `${index === 0 ? 'M' : 'L'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`;
-    }).join(' '));
-    path.setAttribute('class', `map-feature ${feature.kind} priority-${Math.min(10, feature.priority || 1)} detail-${featureDetailLevel(feature)}`);
-    lineGroup.appendChild(path);
+    if (feature.kind === 'place' && feature.point) labels.push(feature);
+    else if (Array.isArray(feature.points) && feature.points.length > 1) lines.push(feature);
   });
-  applyMapTransform();
+  lines.sort((a, b) => (a.priority || 0) - (b.priority || 0));
+  lines.forEach((feature) => drawMapFeature(ctx, feature, viewport, rect.width, rect.height));
+  labels.forEach((feature) => drawMapLabel(ctx, feature, viewport, rect.width, rect.height));
+  updateMapMarkers();
+}
+
+function drawMapBackground(ctx, width, height) {
+  ctx.fillStyle = '#18282b';
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = 'rgba(238, 244, 242, 0.08)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < width; x += 64) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+  }
+  for (let y = 0; y < height; y += 64) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+}
+
+function drawMapFeature(ctx, feature, viewport, width, height) {
+  const style = mapFeatureStyle(feature);
+  if (!style) return;
+  ctx.beginPath();
+  let moved = false;
+  feature.points.forEach((item) => {
+    const point = mapCoordToScreen(item[1], item[0], viewport, width, height);
+    if (!moved) {
+      ctx.moveTo(point.x, point.y);
+      moved = true;
+    } else {
+      ctx.lineTo(point.x, point.y);
+    }
+  });
+  if (!moved) return;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = style.stroke;
+  ctx.lineWidth = style.width;
+  ctx.setLineDash(style.dash || []);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawMapLabel(ctx, feature, viewport, width, height) {
+  const label = feature.label || feature.tags?.name || '';
+  if (!label) return;
+  if (state.mapView.zoom < 2 && (feature.priority || 0) < 8) return;
+  const point = mapCoordToScreen(feature.point[1], feature.point[0], viewport, width, height);
+  if (point.x < 8 || point.y < 8 || point.x > width - 8 || point.y > height - 8) return;
+  const size = state.mapView.zoom >= 8 ? 14 : 12;
+  ctx.font = `700 ${size}px system-ui, -apple-system, Segoe UI, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = 'rgba(14, 22, 25, 0.9)';
+  ctx.fillStyle = '#f4faf8';
+  ctx.strokeText(label, point.x, point.y);
+  ctx.fillText(label, point.x, point.y);
+}
+
+function mapFeatureStyle(feature) {
+  if (feature.kind === 'road') {
+    const priority = feature.priority || 0;
+    if (priority >= 8) return {stroke: '#ffd86f', width: 3.2};
+    if (priority >= 6) return {stroke: '#f0c96f', width: 2.2};
+    if (priority >= 4) return {stroke: '#ecd9a0', width: 1.5};
+    return {stroke: '#d8cda8', width: 1};
+  }
+  if (feature.kind === 'waterway') return {stroke: '#69c6ff', width: 1.6};
+  if (feature.kind === 'water') return {stroke: '#69c6ff', width: 1.2};
+  if (feature.kind === 'rail') return {stroke: '#f0f3f3', width: 1.2, dash: [5, 4]};
+  return null;
 }
 
 function applyMapTransform() {
-  const view = state.mapView;
-  els.mapPanLayer.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
-  els.offlineMap.classList.toggle('map-zoom-mid', view.scale >= 4);
-  els.offlineMap.classList.toggle('map-zoom-high', view.scale >= 12);
-  els.offlineMap.classList.toggle('map-zoom-max', view.scale >= 32);
+  els.offlineMap.classList.toggle('map-zoom-mid', state.mapView.zoom >= 4);
+  els.offlineMap.classList.toggle('map-zoom-high', state.mapView.zoom >= 12);
+  els.offlineMap.classList.toggle('map-zoom-max', state.mapView.zoom >= 32);
   ensureMapVectorDetail();
+  renderMapCanvas();
 }
 
 function zoomMap(delta, clientX = null, clientY = null) {
-  const view = state.mapView;
-  const previousScale = view.scale;
-  const nextScale = Math.max(1, Math.min(80, previousScale * delta));
-  if (nextScale === previousScale) return;
-  if (clientX !== null && clientY !== null) {
-    const rect = els.offlineMap.getBoundingClientRect();
-    const originX = clientX - rect.left - rect.width / 2;
-    const originY = clientY - rect.top - rect.height / 2;
-    const ratio = nextScale / previousScale;
-    view.x = originX - (originX - view.x) * ratio;
-    view.y = originY - (originY - view.y) * ratio;
+  const previousZoom = state.mapView.zoom;
+  const nextZoom = Math.max(1, Math.min(80, previousZoom * delta));
+  if (nextZoom === previousZoom) return;
+  const rect = els.offlineMap.getBoundingClientRect();
+  const viewport = currentMapViewport();
+  let anchor = null;
+  if (clientX !== null && clientY !== null && rect.width && rect.height) {
+    anchor = screenToMapCoord(clientX - rect.left, clientY - rect.top, viewport, rect.width, rect.height);
   }
-  view.scale = nextScale;
+  state.mapView.zoom = nextZoom;
+  if (anchor) {
+    const nextViewport = currentMapViewport();
+    const rx = (clientX - rect.left) / rect.width;
+    const ry = (clientY - rect.top) / rect.height;
+    state.mapView.centerX = anchor.x - (rx - 0.5) * nextViewport.spanX;
+    state.mapView.centerY = anchor.y + (ry - 0.5) * nextViewport.spanY;
+  }
   clampMapView();
   applyMapTransform();
 }
 
 function resetMapView() {
-  state.mapView.scale = 1;
-  state.mapView.x = 0;
-  state.mapView.y = 0;
-  fitMapLayer();
+  const base = baseMapViewport();
+  state.mapView.zoom = 1;
+  state.mapView.centerX = base.centerX;
+  state.mapView.centerY = base.centerY;
   applyMapTransform();
 }
 
 function clampMapView() {
-  const view = state.mapView;
-  const rect = els.offlineMap.getBoundingClientRect();
-  const layer = els.mapPanLayer.getBoundingClientRect();
-  const maxX = Math.max(0, (layer.width * view.scale - rect.width) / 2);
-  const maxY = Math.max(0, (layer.height * view.scale - rect.height) / 2);
-  view.x = Math.max(-maxX, Math.min(maxX, view.x));
-  view.y = Math.max(-maxY, Math.min(maxY, view.y));
+  const base = baseMapViewport();
+  const viewport = currentMapViewport();
+  const maxX = Math.max(0, (base.spanX - viewport.spanX) / 2);
+  const maxY = Math.max(0, (base.spanY - viewport.spanY) / 2);
+  state.mapView.centerX = Math.max(base.centerX - maxX, Math.min(base.centerX + maxX, state.mapView.centerX));
+  state.mapView.centerY = Math.max(base.centerY - maxY, Math.min(base.centerY + maxY, state.mapView.centerY));
 }
 
 function fitMapLayer() {
-  const bounds = state.mapStatus?.bounds;
-  if (!bounds) return;
-  const rect = els.offlineMap.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-  const aspect = mapAspect(bounds);
-  const containerAspect = rect.width / rect.height;
-  let width;
-  let height;
-  if (containerAspect > aspect) {
-    height = rect.height;
-    width = height * aspect;
-  } else {
-    width = rect.width;
-    height = width / aspect;
-  }
-  els.mapPanLayer.style.width = `${width}px`;
-  els.mapPanLayer.style.height = `${height}px`;
-  els.mapPanLayer.style.left = `${(rect.width - width) / 2}px`;
-  els.mapPanLayer.style.top = `${(rect.height - height) / 2}px`;
-  clampMapView();
-  applyMapTransform();
+  if (state.mapView.centerX === null || state.mapView.centerY === null) resetMapView();
+  else applyMapTransform();
 }
 
 function startMapDrag(event) {
   if (event.button !== undefined && event.button !== 0) return;
+  const rect = els.offlineMap.getBoundingClientRect();
+  const viewport = currentMapViewport();
   state.mapView.dragging = true;
   state.mapView.dragStartX = event.clientX;
   state.mapView.dragStartY = event.clientY;
-  state.mapView.startX = state.mapView.x;
-  state.mapView.startY = state.mapView.y;
+  state.mapView.startCenterX = state.mapView.centerX;
+  state.mapView.startCenterY = state.mapView.centerY;
+  state.mapView.dragSpanX = viewport.spanX;
+  state.mapView.dragSpanY = viewport.spanY;
+  state.mapView.dragWidth = rect.width || 1;
+  state.mapView.dragHeight = rect.height || 1;
   els.offlineMap.classList.add('dragging');
   els.offlineMap.setPointerCapture?.(event.pointerId);
 }
 
 function moveMapDrag(event) {
   if (!state.mapView.dragging) return;
-  state.mapView.x = state.mapView.startX + event.clientX - state.mapView.dragStartX;
-  state.mapView.y = state.mapView.startY + event.clientY - state.mapView.dragStartY;
+  const dx = event.clientX - state.mapView.dragStartX;
+  const dy = event.clientY - state.mapView.dragStartY;
+  state.mapView.centerX = state.mapView.startCenterX - dx / state.mapView.dragWidth * state.mapView.dragSpanX;
+  state.mapView.centerY = state.mapView.startCenterY + dy / state.mapView.dragHeight * state.mapView.dragSpanY;
   clampMapView();
   applyMapTransform();
 }
@@ -536,14 +610,14 @@ function renderPositions(positions) {
   state.positions = positions;
   els.nodeMarkers.innerHTML = '';
   positions.forEach((position) => {
-    const point = projectPoint(position.latitude, position.longitude);
     const marker = document.createElement('button');
     marker.type = 'button';
     marker.className = `map-marker node ${position.freshness || 'stale'}`;
-    marker.style.left = `${point.x}%`;
-    marker.style.top = `${point.y}%`;
+    marker.dataset.latitude = position.latitude;
+    marker.dataset.longitude = position.longitude;
     marker.title = `${position.display_name} | stored position`;
     marker.textContent = position.display_name;
+    positionMarker(marker, position.latitude, position.longitude);
     els.nodeMarkers.appendChild(marker);
   });
 }
@@ -556,15 +630,15 @@ function renderWaypoints(waypoints) {
     els.waypointList.innerHTML = '<div class="empty-state">No local waypoints yet.</div>';
   }
   waypoints.forEach((waypoint) => {
-    const point = projectPoint(waypoint.latitude, waypoint.longitude);
     const marker = document.createElement('button');
     marker.type = 'button';
     marker.className = `map-marker waypoint ${waypoint.status}`;
-    marker.style.left = `${point.x}%`;
-    marker.style.top = `${point.y}%`;
+    marker.dataset.latitude = waypoint.latitude;
+    marker.dataset.longitude = waypoint.longitude;
     marker.title = `${waypoint.name} | ${waypoint.type}`;
     marker.textContent = waypoint.name;
     marker.addEventListener('click', () => selectWaypoint(waypoint.id));
+    positionMarker(marker, waypoint.latitude, waypoint.longitude);
     els.waypointMarkers.appendChild(marker);
 
     const card = document.createElement('div');
@@ -617,22 +691,109 @@ function renderPendingWaypoints(items) {
 }
 
 function projectPoint(latitude, longitude) {
-  const bounds = state.mapStatus?.bounds || {north: 39.38, south: 38.86, west: -91.28, east: -90.58};
-  const point = projectMapPoint(latitude, longitude, bounds);
+  const rect = els.offlineMap.getBoundingClientRect();
+  const viewport = currentMapViewport();
+  const point = mapCoordToScreen(latitude, longitude, viewport, rect.width || 1, rect.height || 1);
   return {
-    x: Math.min(96, Math.max(4, point.x / 10)),
-    y: Math.min(94, Math.max(6, point.y / 10)),
+    x: point.x,
+    y: point.y,
+    visible: point.x >= -40 && point.y >= -40 && point.x <= rect.width + 40 && point.y <= rect.height + 40,
   };
 }
 
-function projectMapPoint(latitude, longitude, bounds) {
-  const x = ((Number(longitude) - bounds.west) / (bounds.east - bounds.west)) * 100;
+function updateMapMarkers() {
+  [...els.nodeMarkers.children, ...els.waypointMarkers.children].forEach((marker) => {
+    positionMarker(marker, marker.dataset.latitude, marker.dataset.longitude);
+  });
+}
+
+function positionMarker(marker, latitude, longitude) {
+  const point = projectPoint(latitude, longitude);
+  marker.style.left = `${point.x}px`;
+  marker.style.top = `${point.y}px`;
+  marker.hidden = !point.visible;
+}
+
+function mapCoordToScreen(latitude, longitude, viewport, width, height) {
+  const point = worldPoint(latitude, longitude);
+  return {
+    x: (point.x - viewport.left) / viewport.spanX * width,
+    y: (viewport.top - point.y) / viewport.spanY * height,
+  };
+}
+
+function screenToMapCoord(x, y, viewport, width, height) {
+  return {
+    x: viewport.left + (x / width) * viewport.spanX,
+    y: viewport.top - (y / height) * viewport.spanY,
+  };
+}
+
+function currentMapViewport() {
+  const base = baseMapViewport();
+  const zoom = Math.max(1, state.mapView.zoom || 1);
+  const centerX = state.mapView.centerX ?? base.centerX;
+  const centerY = state.mapView.centerY ?? base.centerY;
+  const spanX = base.spanX / zoom;
+  const spanY = base.spanY / zoom;
+  return {
+    centerX,
+    centerY,
+    spanX,
+    spanY,
+    left: centerX - spanX / 2,
+    right: centerX + spanX / 2,
+    top: centerY + spanY / 2,
+    bottom: centerY - spanY / 2,
+  };
+}
+
+function baseMapViewport() {
+  const bounds = state.mapStatus?.bounds || {north: 39.38, south: 38.86, west: -91.28, east: -90.58};
+  const world = mapWorldBounds(bounds);
+  const rect = els.offlineMap.getBoundingClientRect();
+  const containerAspect = Math.max(0.1, (rect.width || 1) / (rect.height || 1));
+  let spanX = world.spanX;
+  let spanY = world.spanY;
+  const worldAspect = spanX / spanY;
+  if (worldAspect > containerAspect) {
+    spanY = spanX / containerAspect;
+  } else {
+    spanX = spanY * containerAspect;
+  }
+  return {
+    centerX: world.centerX,
+    centerY: world.centerY,
+    spanX,
+    spanY,
+  };
+}
+
+function mapWorldBounds(bounds) {
+  const west = Number(bounds.west);
+  const east = Number(bounds.east);
   const north = mercatorY(bounds.north);
   const south = mercatorY(bounds.south);
-  const y = ((north - mercatorY(latitude)) / (north - south)) * 100;
+  const left = Math.min(west, east) * Math.PI / 180;
+  const right = Math.max(west, east) * Math.PI / 180;
+  const top = Math.max(north, south);
+  const bottom = Math.min(north, south);
   return {
-    x: x * 10,
-    y: y * 10,
+    left,
+    right,
+    top,
+    bottom,
+    centerX: (left + right) / 2,
+    centerY: (top + bottom) / 2,
+    spanX: Math.max(0.000001, right - left),
+    spanY: Math.max(0.000001, top - bottom),
+  };
+}
+
+function worldPoint(latitude, longitude) {
+  return {
+    x: Number(longitude) * Math.PI / 180,
+    y: mercatorY(latitude),
   };
 }
 
@@ -642,27 +803,10 @@ function mercatorY(latitude) {
   return Math.log(Math.tan(Math.PI / 4 + radians / 2));
 }
 
-function mapAspect(bounds) {
-  const centerLat = Number(bounds.center_latitude ?? ((Number(bounds.north) + Number(bounds.south)) / 2));
-  const xSpan = Math.max(0.0001, Number(bounds.east) - Number(bounds.west)) * Math.cos(centerLat * Math.PI / 180);
-  const ySpan = Math.max(0.0001, Math.abs(mercatorY(bounds.north) - mercatorY(bounds.south))) * 180 / Math.PI;
-  return Math.max(0.25, Math.min(4, xSpan / ySpan));
-}
-
-function featureDetailLevel(feature) {
-  if (feature.kind === 'place') return 'base';
-  if (feature.kind === 'rail' || feature.kind === 'water') return 'mid';
-  if (feature.kind === 'waterway') return 'high';
-  if ((feature.priority || 0) >= 8) return 'base';
-  if ((feature.priority || 0) >= 6) return 'mid';
-  if ((feature.priority || 0) >= 4) return 'high';
-  return 'max';
-}
-
 function vectorDetailForScale() {
-  if (state.mapView.scale >= 32) return 'max';
-  if (state.mapView.scale >= 12) return 'high';
-  if (state.mapView.scale >= 4) return 'mid';
+  if (state.mapView.zoom >= 32) return 'max';
+  if (state.mapView.zoom >= 12) return 'high';
+  if (state.mapView.zoom >= 4) return 'mid';
   return 'base';
 }
 
@@ -677,7 +821,10 @@ async function ensureMapVectorDetail(force = false) {
     renderMapVector(vector);
     state.mapVectorDetail = detail;
   } catch (error) {
-    if (force) els.mapVector.replaceChildren();
+    if (force) {
+      state.mapVector = null;
+      renderMapCanvas();
+    }
   } finally {
     if (state.mapVectorLoading === detail) state.mapVectorLoading = '';
   }
@@ -996,7 +1143,8 @@ async function loadMapStatus() {
   if (status.tiles === 'local_vector') {
     await ensureMapVectorDetail(!state.mapVectorDetail);
   } else {
-    els.mapVector.replaceChildren();
+    state.mapVector = null;
+    renderMapCanvas();
     state.mapVectorDetail = '';
     state.mapVectorLoading = '';
   }

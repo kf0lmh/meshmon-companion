@@ -451,8 +451,7 @@ button, textarea, input {
 }
 .map-pan-layer {
   position: absolute;
-  transform-origin: 50% 50%;
-  will-change: transform;
+  inset: 0;
 }
 .map-tiles {
   position: absolute;
@@ -467,7 +466,7 @@ button, textarea, input {
   object-fit: cover;
   image-rendering: auto;
 }
-.map-vector {
+.map-canvas {
   position: absolute;
   inset: 0;
   z-index: 1;
@@ -476,86 +475,8 @@ button, textarea, input {
   background: #18282b;
   pointer-events: none;
 }
-.map-feature {
-  display: none;
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-}
-.map-feature.detail-base,
-.map-zoom-mid .map-feature.detail-mid,
-.map-zoom-high .map-feature.detail-high,
-.map-zoom-max .map-feature {
-  display: initial;
-}
-.map-feature.road {
-  stroke: #f1dfa4;
-  stroke-width: 1.5;
-}
-.map-feature.road.priority-10,
-.map-feature.road.priority-9,
-.map-feature.road.priority-8 {
-  stroke: #ffd86f;
-  stroke-width: 3.2;
-}
-.map-feature.road.priority-7,
-.map-feature.road.priority-6 {
-  stroke: #f0c96f;
-  stroke-width: 2.4;
-}
-.map-feature.waterway {
-  stroke: #69c6ff;
-  stroke-width: 2;
-}
-.map-feature.water {
-  fill: rgba(75, 157, 207, 0.45);
-  stroke: #69c6ff;
-  stroke-width: 1.4;
-}
-.map-feature.rail {
-  stroke: #f0f3f3;
-  stroke-width: 1.5;
-  stroke-dasharray: 5 4;
-}
-.map-feature-label {
-  display: none;
-  fill: #e7efed;
-  stroke: rgba(14, 22, 25, 0.85);
-  stroke-width: 3;
-  paint-order: stroke;
-  font-size: 18px;
-  font-weight: 700;
-  text-anchor: middle;
-  dominant-baseline: central;
-  pointer-events: none;
-}
-.map-zoom-mid .map-feature-label.priority-10,
-.map-zoom-mid .map-feature-label.priority-9,
-.map-zoom-mid .map-feature-label.priority-8,
-.map-zoom-high .map-feature-label {
-  display: initial;
-}
-.map-feature-label.priority-4,
-.map-feature-label.priority-5,
-.map-feature-label.priority-6 {
-  font-size: 14px;
-}
 .map-grid {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background-image:
-    linear-gradient(rgba(238, 244, 242, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(238, 244, 242, 0.08) 1px, transparent 1px);
-  background-size: 48px 48px;
-}
-.map-grid::after {
-  content: "";
-  position: absolute;
-  inset: 12%;
-  border: 1px dashed rgba(238, 244, 242, 0.18);
-  border-radius: 50%;
+  display: none;
 }
 .map-label {
   position: absolute;
