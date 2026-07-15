@@ -451,7 +451,6 @@ button, textarea, input {
 }
 .map-pan-layer {
   position: absolute;
-  inset: 0;
   transform-origin: 50% 50%;
   will-change: transform;
 }
@@ -478,10 +477,17 @@ button, textarea, input {
   pointer-events: none;
 }
 .map-feature {
+  display: none;
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
+}
+.map-feature.detail-base,
+.map-zoom-mid .map-feature.detail-mid,
+.map-zoom-high .map-feature.detail-high,
+.map-zoom-max .map-feature {
+  display: initial;
 }
 .map-feature.road {
   stroke: #f1dfa4;
@@ -513,6 +519,7 @@ button, textarea, input {
   stroke-dasharray: 5 4;
 }
 .map-feature-label {
+  display: none;
   fill: #e7efed;
   stroke: rgba(14, 22, 25, 0.85);
   stroke-width: 3;
@@ -522,6 +529,12 @@ button, textarea, input {
   text-anchor: middle;
   dominant-baseline: central;
   pointer-events: none;
+}
+.map-zoom-mid .map-feature-label.priority-10,
+.map-zoom-mid .map-feature-label.priority-9,
+.map-zoom-mid .map-feature-label.priority-8,
+.map-zoom-high .map-feature-label {
+  display: initial;
 }
 .map-feature-label.priority-4,
 .map-feature-label.priority-5,

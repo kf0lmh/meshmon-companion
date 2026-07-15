@@ -360,6 +360,7 @@ function renderMapStatus(status) {
       ? 'Local offline map tiles are installed for this area.'
       : 'This is only a coordinate plot against rough regional bounds. It is not a street, topo, or parcel map.');
   renderMapTiles(status);
+  requestAnimationFrame(fitMapLayer);
   populateWaypointOptions();
 }
 
@@ -428,20 +429,24 @@ function renderMapVector(vector) {
       const point = projectMapPoint(item[1], item[0], bounds);
       return `${index === 0 ? 'M' : 'L'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`;
     }).join(' '));
-    path.setAttribute('class', `map-feature ${feature.kind} priority-${Math.min(10, feature.priority || 1)}`);
+    path.setAttribute('class', `map-feature ${feature.kind} priority-${Math.min(10, feature.priority || 1)} detail-${featureDetailLevel(feature)}`);
     lineGroup.appendChild(path);
   });
+  applyMapTransform();
 }
 
 function applyMapTransform() {
   const view = state.mapView;
   els.mapPanLayer.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+  els.offlineMap.classList.toggle('map-zoom-mid', view.scale >= 4);
+  els.offlineMap.classList.toggle('map-zoom-high', view.scale >= 12);
+  els.offlineMap.classList.toggle('map-zoom-max', view.scale >= 32);
 }
 
 function zoomMap(delta, clientX = null, clientY = null) {
   const view = state.mapView;
   const previousScale = view.scale;
-  const nextScale = Math.max(1, Math.min(5, previousScale * delta));
+  const nextScale = Math.max(1, Math.min(80, previousScale * delta));
   if (nextScale === previousScale) return;
   if (clientX !== null && clientY !== null) {
     const rect = els.offlineMap.getBoundingClientRect();
@@ -460,16 +465,42 @@ function resetMapView() {
   state.mapView.scale = 1;
   state.mapView.x = 0;
   state.mapView.y = 0;
+  fitMapLayer();
   applyMapTransform();
 }
 
 function clampMapView() {
   const view = state.mapView;
   const rect = els.offlineMap.getBoundingClientRect();
-  const maxX = rect.width * (view.scale - 1) / 2;
-  const maxY = rect.height * (view.scale - 1) / 2;
+  const layer = els.mapPanLayer.getBoundingClientRect();
+  const maxX = Math.max(0, (layer.width * view.scale - rect.width) / 2);
+  const maxY = Math.max(0, (layer.height * view.scale - rect.height) / 2);
   view.x = Math.max(-maxX, Math.min(maxX, view.x));
   view.y = Math.max(-maxY, Math.min(maxY, view.y));
+}
+
+function fitMapLayer() {
+  const bounds = state.mapStatus?.bounds;
+  if (!bounds) return;
+  const rect = els.offlineMap.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const aspect = mapAspect(bounds);
+  const containerAspect = rect.width / rect.height;
+  let width;
+  let height;
+  if (containerAspect > aspect) {
+    height = rect.height;
+    width = height * aspect;
+  } else {
+    width = rect.width;
+    height = width / aspect;
+  }
+  els.mapPanLayer.style.width = `${width}px`;
+  els.mapPanLayer.style.height = `${height}px`;
+  els.mapPanLayer.style.left = `${(rect.width - width) / 2}px`;
+  els.mapPanLayer.style.top = `${(rect.height - height) / 2}px`;
+  clampMapView();
+  applyMapTransform();
 }
 
 function startMapDrag(event) {
@@ -593,11 +624,34 @@ function projectPoint(latitude, longitude) {
 
 function projectMapPoint(latitude, longitude, bounds) {
   const x = ((Number(longitude) - bounds.west) / (bounds.east - bounds.west)) * 100;
-  const y = ((bounds.north - Number(latitude)) / (bounds.north - bounds.south)) * 100;
+  const north = mercatorY(bounds.north);
+  const south = mercatorY(bounds.south);
+  const y = ((north - mercatorY(latitude)) / (north - south)) * 100;
   return {
     x: x * 10,
     y: y * 10,
   };
+}
+
+function mercatorY(latitude) {
+  const clamped = Math.max(-85, Math.min(85, Number(latitude)));
+  const radians = clamped * Math.PI / 180;
+  return Math.log(Math.tan(Math.PI / 4 + radians / 2));
+}
+
+function mapAspect(bounds) {
+  const centerLat = Number(bounds.center_latitude ?? ((Number(bounds.north) + Number(bounds.south)) / 2));
+  const xSpan = Math.max(0.0001, Number(bounds.east) - Number(bounds.west)) * Math.cos(centerLat * Math.PI / 180);
+  const ySpan = Math.max(0.0001, Math.abs(mercatorY(bounds.north) - mercatorY(bounds.south))) * 180 / Math.PI;
+  return Math.max(0.25, Math.min(4, xSpan / ySpan));
+}
+
+function featureDetailLevel(feature) {
+  if (feature.kind === 'place') return 'base';
+  if (feature.kind === 'rail' || feature.kind === 'water' || feature.kind === 'waterway') return 'mid';
+  if ((feature.priority || 0) >= 6) return 'base';
+  if ((feature.priority || 0) >= 4) return 'mid';
+  return 'high';
 }
 
 function lonToTileX(longitude, zoom) {
@@ -1201,12 +1255,12 @@ els.addWaypointButton.addEventListener('click', () => {
   els.waypointName.focus();
 });
 els.clearWaypointButton.addEventListener('click', clearWaypointForm);
-els.mapZoomIn.addEventListener('click', () => zoomMap(1.25));
-els.mapZoomOut.addEventListener('click', () => zoomMap(0.8));
+els.mapZoomIn.addEventListener('click', () => zoomMap(2));
+els.mapZoomOut.addEventListener('click', () => zoomMap(0.5));
 els.mapReset.addEventListener('click', resetMapView);
 els.offlineMap.addEventListener('wheel', (event) => {
   event.preventDefault();
-  zoomMap(event.deltaY < 0 ? 1.15 : 0.87, event.clientX, event.clientY);
+  zoomMap(event.deltaY < 0 ? 1.35 : 0.74, event.clientX, event.clientY);
 }, {passive: false});
 els.offlineMap.addEventListener('pointerdown', startMapDrag);
 els.offlineMap.addEventListener('pointermove', moveMapDrag);
@@ -1253,6 +1307,7 @@ els.fullscreenButton.addEventListener('click', () => {
     document.exitFullscreen?.();
   }
 });
+window.addEventListener('resize', fitMapLayer);
 
 refreshAll();
 setInterval(refreshAll, 15000);
