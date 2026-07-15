@@ -9,6 +9,8 @@ const state = {
   activeNetSession: null,
   netSessions: [],
   netLogEntries: [],
+  mapVectorDetail: '',
+  mapVectorLoading: '',
   mapView: {scale: 1, x: 0, y: 0, dragging: false, dragStartX: 0, dragStartY: 0, startX: 0, startY: 0},
 };
 
@@ -441,6 +443,7 @@ function applyMapTransform() {
   els.offlineMap.classList.toggle('map-zoom-mid', view.scale >= 4);
   els.offlineMap.classList.toggle('map-zoom-high', view.scale >= 12);
   els.offlineMap.classList.toggle('map-zoom-max', view.scale >= 32);
+  ensureMapVectorDetail();
 }
 
 function zoomMap(delta, clientX = null, clientY = null) {
@@ -652,6 +655,30 @@ function featureDetailLevel(feature) {
   if ((feature.priority || 0) >= 6) return 'base';
   if ((feature.priority || 0) >= 4) return 'mid';
   return 'high';
+}
+
+function vectorDetailForScale() {
+  if (state.mapView.scale >= 32) return 'max';
+  if (state.mapView.scale >= 12) return 'high';
+  if (state.mapView.scale >= 4) return 'mid';
+  return 'base';
+}
+
+async function ensureMapVectorDetail(force = false) {
+  if (state.mapStatus?.tiles !== 'local_vector') return;
+  const detail = vectorDetailForScale();
+  if (!force && (state.mapVectorDetail === detail || state.mapVectorLoading === detail)) return;
+  state.mapVectorLoading = detail;
+  try {
+    const vector = await api(`/api/map/vector?detail=${encodeURIComponent(detail)}`);
+    if (state.mapVectorLoading !== detail) return;
+    renderMapVector(vector);
+    state.mapVectorDetail = detail;
+  } catch (error) {
+    if (force) els.mapVector.replaceChildren();
+  } finally {
+    if (state.mapVectorLoading === detail) state.mapVectorLoading = '';
+  }
 }
 
 function lonToTileX(longitude, zoom) {
@@ -965,13 +992,11 @@ async function loadMapStatus() {
   const status = await api('/api/map/status');
   renderMapStatus(status);
   if (status.tiles === 'local_vector') {
-    try {
-      renderMapVector(await api('/api/map/vector'));
-    } catch (error) {
-      els.mapVector.replaceChildren();
-    }
+    await ensureMapVectorDetail(!state.mapVectorDetail);
   } else {
     els.mapVector.replaceChildren();
+    state.mapVectorDetail = '';
+    state.mapVectorLoading = '';
   }
 }
 

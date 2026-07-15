@@ -43,6 +43,27 @@ def db_error_payload(exc):
     }
 
 
+def vector_feature_detail(feature):
+    kind = feature.get("kind")
+    priority = int(feature.get("priority") or 0)
+    if kind == "place":
+        return "base"
+    if kind in ("rail", "water", "waterway"):
+        return "mid"
+    if priority >= 6:
+        return "base"
+    if priority >= 4:
+        return "mid"
+    return "high"
+
+
+def vector_feature_visible_at_detail(feature, detail):
+    levels = {"base": 0, "mid": 1, "high": 2, "max": 3}
+    requested = levels.get(detail, 0)
+    required = levels.get(vector_feature_detail(feature), 0)
+    return required <= requested
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
@@ -56,8 +77,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def send_json(self, value, status=200):
-        data = json.dumps(value, indent=2).encode()
+    def send_json(self, value, status=200, compact=False):
+        if compact:
+            data = json.dumps(value, separators=(",", ":")).encode()
+        else:
+            data = json.dumps(value, indent=2).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
@@ -107,7 +131,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def send_map_vector(self):
+    def send_map_vector(self, query):
         path = OFFLINE_MAP_PATH / "vector_map.json"
         try:
             resolved = path.resolve()
@@ -123,7 +147,12 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, json.JSONDecodeError):
             self.send_json({"error": "Map vector package is unreadable"}, 500)
             return
-        self.send_json(data)
+        detail = query.get("detail", ["base"])[0]
+        data["features"] = [
+            feature for feature in data.get("features", [])
+            if vector_feature_visible_at_detail(feature, detail)
+        ]
+        self.send_json(data, compact=True)
 
     def read_json_body(self):
         length = int(self.headers.get("Content-Length", "0") or "0")
@@ -178,7 +207,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/map/tile":
             self.send_map_tile(query)
         elif path == "/api/map/vector":
-            self.send_map_vector()
+            self.send_map_vector(query)
         elif path == "/api/positions":
             repo = self.repo_or_503()
             if repo:
