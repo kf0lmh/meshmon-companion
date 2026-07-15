@@ -25,6 +25,7 @@ class NodeAdapter:
         self.node_host = os.environ.get("FIELDSTATION_NODE_HOST", "").strip()
         self.node_port = positive_int(os.environ.get("FIELDSTATION_NODE_PORT"), 4403)
         self.client_enabled = truthy(os.environ.get("FIELDSTATION_ENABLE_MESHTASTIC", "0"))
+        self.tx_enabled = truthy(os.environ.get("FIELDSTATION_TX_ENABLED", "0"))
         self.autodetect_enabled = truthy(os.environ.get("FIELDSTATION_SERIAL_AUTODETECT", "1"))
         self.read_timeout = positive_int(os.environ.get("FIELDSTATION_MESHTASTIC_READ_TIMEOUT"), 12)
         self.cache_seconds = positive_int(os.environ.get("FIELDSTATION_ADAPTER_CACHE_SECONDS"), 30)
@@ -156,7 +157,7 @@ class NodeAdapter:
             if cached:
                 cached["connection_type"] = "tcp"
                 cached["adapter_strategy"] = "tcp_meshtastic_python"
-                cached["adapter_mode"] = "read_only_tcp"
+                cached["adapter_mode"] = self.live_adapter_mode("tcp")
                 cached["selected_port"] = f"{self.node_host}:{self.node_port}"
                 return cached
             return self.read_meshtastic_status_tcp(dependency, now)
@@ -207,8 +208,10 @@ class NodeAdapter:
         cached = dict(self.previous_status)
         cached["cached"] = True
         cached["updated_at"] = now
-        cached["tx_available"] = False
+        cached["tx_available"] = self.tx_enabled
         cached["message_receipts_available"] = False
+        cached["adapter_mode"] = self.live_adapter_mode(cached.get("connection_type", "usb"))
+        cached["read_only"] = not self.tx_enabled
         cached["offline"] = False
         return cached
 
@@ -231,19 +234,19 @@ class NodeAdapter:
                 "previous_state": self.previous_status.get("state"),
                 "connection_type": "usb",
                 "adapter_strategy": "direct_usb_meshtastic_python",
-                "adapter_mode": "read_only_usb",
+                "adapter_mode": self.live_adapter_mode("usb"),
                 "selected_port": selected_port,
                 "detected_ports": serial_ports,
                 "serial_autodetect_enabled": self.autodetect_enabled,
                 "dependency": dependency,
                 "real_client_enabled": self.client_enabled,
-                "read_only": True,
+                "read_only": not self.tx_enabled,
                 "live_mode_available": True,
                 "read_only_live_available": True,
                 "telemetry_live": telemetry_live,
-                "tx_available": False,
+                "tx_available": self.tx_enabled,
                 "message_receipts_available": False,
-                "reason": "read_only_ok",
+                "reason": "manual_tx_ok" if self.tx_enabled else "read_only_ok",
                 "permission_warning": "",
                 "reconnect_attempts": 0,
                 "last_successful_connection_at": now,
@@ -253,7 +256,7 @@ class NodeAdapter:
                 "stale": False,
                 "offline": False,
                 "error": "",
-                "detail": "Read-only USB adapter is connected. Transmit and config writes are disabled.",
+                "detail": self.live_adapter_detail("USB"),
                 "local_node": local_node,
                 "known_nodes": nodes,
                 "read_only_channels": channels,
@@ -312,11 +315,11 @@ class NodeAdapter:
                 now,
                 connection_type="tcp",
                 adapter_strategy="tcp_meshtastic_python",
-                adapter_mode="read_only_tcp",
+                adapter_mode=self.live_adapter_mode("tcp"),
                 selected_port=f"{self.node_host}:{self.node_port}",
                 detected_ports=[],
                 serial_autodetect_enabled=False,
-                detail="Read-only TCP adapter is connected. Transmit and config writes are disabled.",
+                detail=self.live_adapter_detail("TCP"),
             )
         except Exception as exc:
             return self.read_error_status(
@@ -370,13 +373,13 @@ class NodeAdapter:
             "serial_autodetect_enabled": serial_autodetect_enabled,
             "dependency": dependency,
             "real_client_enabled": self.client_enabled,
-            "read_only": True,
+            "read_only": not self.tx_enabled,
             "live_mode_available": True,
             "read_only_live_available": True,
             "telemetry_live": telemetry_live,
-            "tx_available": False,
+            "tx_available": self.tx_enabled,
             "message_receipts_available": False,
-            "reason": "read_only_ok",
+            "reason": "manual_tx_ok" if self.tx_enabled else "read_only_ok",
             "permission_warning": "",
             "reconnect_attempts": 0,
             "last_successful_connection_at": now,
@@ -392,6 +395,15 @@ class NodeAdapter:
             "read_only_channels": channels,
             "updated_at": now,
         }
+
+    def live_adapter_mode(self, transport):
+        prefix = "manual_tx" if self.tx_enabled else "read_only"
+        return f"{prefix}_{transport}"
+
+    def live_adapter_detail(self, transport):
+        if self.tx_enabled:
+            return f"{transport} adapter is connected. Manual operator transmit is enabled; config writes and recipient ACK claims are disabled."
+        return f"Read-only {transport} adapter is connected. Transmit and config writes are disabled."
 
     def read_error_status(
         self,
@@ -442,13 +454,71 @@ class NodeAdapter:
 
     def send_text(self, channel_index, body):
         status = self.status()
-        return {
-            "accepted": False,
-            "status": "queued_local",
-            "detail": "FieldStation is read-only in this phase; message remains a local queue entry only.",
-            "adapter_status": status,
-        }
+        if not self.tx_enabled:
+            return {
+                "accepted": False,
+                "status": "queued_local",
+                "detail": "Transmit is disabled; message remains a local queue entry only.",
+                "adapter_status": status,
+            }
+        if status.get("state") != "connected":
+            return {
+                "accepted": False,
+                "status": "retry_available",
+                "detail": "Transmit is enabled, but no connected node adapter is available.",
+                "adapter_status": status,
+            }
+        try:
+            if self.connection_type == "tcp":
+                self.send_text_tcp(channel_index, body)
+            else:
+                self.send_text_usb(status.get("selected_port"), channel_index, body)
+            status["tx_available"] = True
+            status["message_receipts_available"] = False
+            return {
+                "accepted": True,
+                "status": "sent_by_local_node",
+                "detail": "Submitted to the local node. FieldStation does not claim mesh delivery or recipient ACK.",
+                "adapter_status": status,
+            }
+        except Exception as exc:
+            status["last_error"] = str(exc)
+            return {
+                "accepted": False,
+                "status": "retry_available",
+                "detail": f"Transmit attempt failed before local node submission: {exc}",
+                "adapter_status": status,
+            }
 
+    def send_text_usb(self, selected_port, channel_index, body):
+        if not selected_port:
+            raise ValueError("No serial port selected")
+        iface = None
+        try:
+            from meshtastic.serial_interface import SerialInterface
+
+            iface = SerialInterface(devPath=selected_port, timeout=self.read_timeout)
+            iface.sendText(body, channelIndex=int(channel_index), wantAck=False, wantResponse=False)
+        finally:
+            if iface is not None:
+                try:
+                    iface.close()
+                except Exception:
+                    pass
+
+    def send_text_tcp(self, channel_index, body):
+        iface = None
+        try:
+            from meshtastic.tcp_interface import TCPInterface
+
+            iface = TCPInterface(self.node_host, portNumber=self.node_port, timeout=self.read_timeout)
+            iface.sendText(body, channelIndex=int(channel_index), wantAck=False, wantResponse=False)
+        finally:
+            if iface is not None:
+                try:
+                    iface.close()
+                except Exception:
+                    pass
 
 def discover_serial_ports():
     ports = []

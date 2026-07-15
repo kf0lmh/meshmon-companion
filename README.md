@@ -78,9 +78,13 @@ seen by the mesh, or mark recipient ACKs.
 
 For lab or workstation testing, FieldStation can also use a deliberately
 configured TCP serial bridge by setting `serial.connection_type: tcp` with
-`serial.tcp_host` and `serial.tcp_port`. TCP mode is still read-only inside
-FieldStation: sends remain local queue entries, and node config/channel writes
-are not performed.
+`serial.tcp_host` and `serial.tcp_port`. Node config/channel writes are not
+performed.
+
+Manual transmit can be enabled only by explicitly setting
+`fieldstation.tx_enabled: true` in local config and re-rendering/restarting the
+service. FieldStation never auto-transmits, never runs transmit loops, and does
+not claim mesh delivery or recipient ACKs.
 
 The installer adds the low-privilege service user to normal serial access
 groups and renders read-only adapter settings into `/etc/default/fieldstation`.

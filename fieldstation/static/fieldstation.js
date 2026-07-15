@@ -179,9 +179,16 @@ function setConnection(status) {
   els.offlineTitle.textContent = connection.state === 'connected'
     ? 'Node connected/read-only'
     : `${connection.state} mode`;
-  els.offlineText.textContent = connection.state === 'connected'
-    ? 'FieldStation is reading live node status. Sending, seen-by-mesh, recipient ACKs, and node configuration writes remain disabled.'
-    : `${connection.detail} Queued messages are local only; live telemetry, seen-by-mesh, and recipient ACKs are unavailable.`;
+  if (connection.state === 'connected' && connection.tx_available) {
+    els.offlineTitle.textContent = 'Node connected/manual TX';
+    els.offlineText.textContent = 'Manual operator transmit is enabled. FieldStation does not auto-transmit, retry automatically, or claim recipient ACKs.';
+  } else if (connection.state === 'connected') {
+    els.offlineText.textContent = 'FieldStation is reading live node status. Manual transmit is disabled; node configuration writes and recipient ACK claims remain disabled.';
+  } else {
+    els.offlineText.textContent = `${connection.detail} Queued messages are local only; live telemetry, seen-by-mesh, and recipient ACKs are unavailable.`;
+  }
+  const submit = els.composeForm.querySelector('button[type="submit"]');
+  if (submit) submit.textContent = connection.tx_available ? 'Send via Node' : 'Queue Local';
 }
 
 function renderChannels() {
