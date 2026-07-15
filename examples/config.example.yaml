@@ -23,9 +23,12 @@ fieldstation:
   adapter_cache_seconds: 30
   read_timeout_seconds: 12
 
+compatibility:
+  optional_stack_enabled: false
+
 serial:
-  connection_type: usb
-  device: /dev/serial/by-id/usb-EXAMPLE_Meshtastic_Device
+  connection_type: skip
+  device: ""
   baud: 115200
   tcp_host: ""
   tcp_port: 4403

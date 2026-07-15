@@ -22,6 +22,9 @@ and tested. Treat those paths as compatibility surfaces, not product identity.
 Phase 6C status:
 
 - FieldStation is its own service, API, UI, and SQLite database.
+- FieldStation-only install/update is the recommended deployment path for new
+  kiosk/operator systems. Optional compatibility tooling is explicit and not
+  required for FieldStation runtime.
 - The adapter is read-only USB only. It may read safe local node status, known
   node summaries, telemetry fields, and channel slot metadata.
 - Channel keys and PSK material are not exposed; channel metadata reports only
@@ -32,6 +35,9 @@ Phase 6C status:
   later phase implements and proves live transmit/receipt behavior.
 - Sending remains a local queue action only. No node config writes, channel
   programming, MQTT enablement, firmware action, or reset behavior is in scope.
+- Docker, the optional dashboard, and serial bridge containers are not required
+  in FieldStation-only mode. Healthcheck reports optional compatibility health
+  separately from FieldStation service/API/database health.
 
 ## Historical Repo Findings
 

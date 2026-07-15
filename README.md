@@ -156,6 +156,9 @@ Install/update behavior:
   from `fieldstation/requirements.txt` for the read-only USB adapter.
 - The `meshmon` service user is added to `dialout` and `tty` when those groups
   exist, so USB serial devices can be read without chmod hacks.
+- FieldStation-only mode is the recommended default for new kiosk/operator
+  systems. It does not require Docker, the optional dashboard, or serial bridge
+  containers.
 - Runtime data under `/opt/meshmon-companion/data` is preserved during updates.
 - Uninstall stops/disables `fieldstation.service` and removes the systemd unit,
   but leaves `/opt/meshmon-companion/data/fieldstation/fieldstation.sqlite3`
@@ -163,10 +166,10 @@ Install/update behavior:
 
 ## Quick Install
 
-Logged one-command install using the current compatibility installer:
+Logged one-command FieldStation-only install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh -o /tmp/meshmon-companion-install.sh && sudo bash /tmp/meshmon-companion-install.sh
+curl -fsSL https://raw.githubusercontent.com/kf0lmh/meshmon-companion/main/install.sh -o /tmp/fieldstation-install.sh && sudo bash /tmp/fieldstation-install.sh --fieldstation-only
 ```
 
 The installer prints a log path at startup. By default it writes to:
@@ -183,12 +186,24 @@ less install.sh
 sudo bash install.sh
 ```
 
+For a non-interactive FieldStation-only install:
+
+```bash
+sudo bash install.sh --non-interactive --fieldstation-only
+```
+
+Optional compatibility tooling can still be installed for hosts that need it:
+
+```bash
+sudo bash install.sh
+```
+
 ## What You Get
 
 - FieldStation local service, API, UI, and SQLite database
 - Managed FieldStation Python environment for the read-only USB adapter
-- Compatibility host control panel
-- Optional compatibility Docker stack when configured
+- Local host maintenance/control panel
+- Optional compatibility Docker stack only when selected
 - SSH-friendly terminal menu: `companion-menu`
 - Health, backup, restore, diagnostics, and restart scripts
 - systemd services and timers
@@ -226,11 +241,14 @@ for conservative default installs where prompts are not possible.
 ./install.sh --update
 ./install.sh --uninstall
 ./install.sh --non-interactive
+./install.sh --fieldstation-only
+./install.sh --update --fieldstation-only
 ```
 
 At the end of install or update, the installer prints the detected access URLs,
-Docker stack status, health status, and a warning if the root filesystem is too
-small for comfortable Docker/log/backup use.
+FieldStation service name, database path, environment path, managed Python
+environment path, health status, and optional compatibility status when that
+stack is enabled.
 
 ## Security Defaults
 

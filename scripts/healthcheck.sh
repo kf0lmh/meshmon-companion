@@ -33,6 +33,7 @@ def read_config():
         "fieldstation_enabled": "true",
         "fieldstation_database": "/opt/meshmon-companion/data/fieldstation/fieldstation.sqlite3",
         "fieldstation_read_timeout_seconds": "12",
+        "compatibility_optional_stack_enabled": "false",
         "serial_device": "",
     }
     section = None
@@ -76,6 +77,11 @@ def read_config():
                     value = value.strip().strip('"')
                     if key == "device":
                         values["serial_device"] = value
+                elif section == "compatibility" and ":" in stripped:
+                    key, value = stripped.split(":", 1)
+                    value = value.strip().strip('"')
+                    if key == "optional_stack_enabled":
+                        values["compatibility_optional_stack_enabled"] = value
     except FileNotFoundError:
         pass
     return values
@@ -87,6 +93,8 @@ fieldstation_service = out(["systemctl", "is-active", "fieldstation"])
 ts_ip = out(["bash", "-lc", "command -v tailscale >/dev/null && tailscale ip -4 | head -1 || true"])
 serial_present = any(os.path.exists(p) for p in ["/dev/serial/by-id"] + [f"/dev/ttyACM{i}" for i in range(4)] + [f"/dev/ttyUSB{i}" for i in range(4)])
 config = read_config()
+compatibility_enabled = str(config["compatibility_optional_stack_enabled"]).lower() in ("true", "1", "yes", "on")
+optional_compatibility_stack_present = docker == "active"
 mesh_host = config["control_bind"]
 if mesh_host in ("", "0.0.0.0", "::"):
     mesh_host = "127.0.0.1"
@@ -156,12 +164,13 @@ if fieldstation_enabled:
     except Exception:
         fieldstation_api = "failed"
 
-if docker != "active": errors.append("Docker is not active")
-if control != "active": errors.append("FieldStation host control service is not active")
-if fieldstation_enabled and fieldstation_service != "active": warnings.append("FieldStation service is not active")
+if compatibility_enabled and docker != "active": warnings.append("Optional compatibility Docker service is not active")
+if control != "active": warnings.append("FieldStation host control service is not active")
+if fieldstation_enabled and fieldstation_service != "active": errors.append("FieldStation service is not active")
 if not serial_present: warnings.append("No serial device detected")
-if api != "ok": warnings.append(f"Compatibility dashboard API is not responding at {mesh_url}")
-if fieldstation_enabled and fieldstation_api == "failed": warnings.append(f"FieldStation API is not responding at {fieldstation_url}")
+if compatibility_enabled and api != "ok": warnings.append(f"Optional compatibility dashboard API is not responding at {mesh_url}")
+if fieldstation_enabled and fieldstation_api == "failed": errors.append(f"FieldStation API is not responding at {fieldstation_url}")
+if fieldstation_enabled and fieldstation_database_ok is False: errors.append("FieldStation database is not healthy")
 
 disk = shutil.disk_usage("/")
 disk_pct = round((disk.used / disk.total) * 100, 1)
@@ -191,6 +200,7 @@ print(json.dumps({
     "serial": {"present": serial_present},
     "fieldstation": {
         "enabled": fieldstation_enabled,
+        "fieldstation_service_ok": fieldstation_service == "active",
         "bind": config["fieldstation_bind"] or config["control_bind"],
         "port": config["fieldstation_port"],
         "port_open": fieldstation_port_open,
@@ -215,6 +225,13 @@ print(json.dumps({
         "message_receipts_available": fieldstation_message_receipts_available,
         "last_successful_read": fieldstation_last_successful_read,
         "last_error": fieldstation_last_error,
+    },
+    "compatibility": {
+        "optional_stack_enabled": compatibility_enabled,
+        "optional_compatibility_stack_present": optional_compatibility_stack_present,
+        "optional_compatibility_stack_ok": (api == "ok") if compatibility_enabled else None,
+        "dashboard_api": api if compatibility_enabled else "disabled",
+        "dashboard_url": mesh_url if compatibility_enabled else None,
     },
     "power": {"temperature": temp, "throttled": throttled},
     "storage": {"root_used_percent": disk_pct},

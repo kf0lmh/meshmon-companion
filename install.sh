@@ -15,6 +15,8 @@ LOG_FILE="${MESHMON_COMPANION_LOG:-/tmp/meshmon-companion-install-$(date +%F_%H%
 DRY_RUN=0
 MODE="install"
 WIZARD=1
+FIELDSTATION_ONLY=0
+COMPATIBILITY_STACK_SELECTED=""
 
 start_logging() {
   if [[ "${MESHMON_COMPANION_NO_LOG:-0}" == "1" || -n "${MESHMON_COMPANION_LOG_ACTIVE:-}" ]]; then
@@ -118,13 +120,15 @@ Current installs use compatibility paths under /opt/meshmon-companion and
 /etc/meshmon-companion until a dedicated FieldStation path migration is tested.
 
 Usage:
-  ./install.sh [--help] [--dry-run] [--uninstall] [--update] [--non-interactive]
+  ./install.sh [--help] [--dry-run] [--uninstall] [--update] [--non-interactive] [--fieldstation-only]
 
 Options:
   --help       Show this help
   --dry-run    Print planned actions without changing the system
   --uninstall  Remove services and installed application files
   --update     Reinstall application files and restart services
+  --fieldstation-only
+               Install/update FieldStation without optional Docker/dashboard components
   --non-interactive  Use conservative defaults and skip optional setup prompts
 
 Review-first install:
@@ -143,6 +147,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=1 ;;
     --uninstall) MODE="uninstall" ;;
     --update) MODE="update" ;;
+    --fieldstation-only) FIELDSTATION_ONLY=1; COMPATIBILITY_STACK_SELECTED="false" ;;
     --non-interactive) WIZARD=0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
   esac
@@ -158,6 +163,43 @@ run() {
   else
     "$@"
   fi
+}
+
+truthy() {
+  case "${1:-}" in
+    true|True|TRUE|1|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+config_section_value_file() {
+  local file="$1" section="$2" key="$3"
+  awk -v section="$section" -v key="$key" '
+    $0 ~ "^[^[:space:]].*:$" { current=$1; sub(/:$/, "", current) }
+    current == section && $1 == key ":" { print $2; exit }
+  ' "$file" 2>/dev/null | tr -d '"'
+}
+
+compatibility_stack_enabled() {
+  local value=""
+  if [[ -f "$CONFIG_FILE" ]]; then
+    value="$(config_section_value_file "$CONFIG_FILE" compatibility optional_stack_enabled)"
+  fi
+  if [[ -n "$value" ]]; then
+    truthy "$value"
+    return
+  fi
+  if [[ "$FIELDSTATION_ONLY" == "1" ]]; then
+    return 1
+  fi
+  if [[ -n "$COMPATIBILITY_STACK_SELECTED" ]]; then
+    truthy "$COMPATIBILITY_STACK_SELECTED"
+    return
+  fi
+  if [[ -f "$CONFIG_FILE" ]]; then
+    return 0
+  fi
+  return 1
 }
 
 ask() {
@@ -265,6 +307,7 @@ install_packages() {
     run apt-get update
     run apt-get install -y curl
   fi
+  if compatibility_stack_enabled; then
   if ! command -v docker >/dev/null 2>&1; then
     log "Docker not found. Installing Docker for optional compatibility services."
     run sh -c 'curl -fsSL https://get.docker.com | sh' || echo "Warning: Docker install failed; FieldStation can continue without the compatibility dashboard stack." >&2
@@ -279,6 +322,9 @@ install_packages() {
     echo "Warning: Docker is unavailable; skipping optional compatibility dashboard stack." >&2
   else
     log "Docker Compose plugin already installed."
+  fi
+  else
+    log "FieldStation-only mode: skipping optional Docker/dashboard dependencies."
   fi
   if ! command -v python3 >/dev/null 2>&1; then
     run apt-get update
@@ -295,6 +341,37 @@ install_packages() {
   if ! command -v whiptail >/dev/null 2>&1 && ! command -v dialog >/dev/null 2>&1; then
     run apt-get update
     run apt-get install -y whiptail
+  fi
+}
+
+choose_install_mode() {
+  COMPATIBILITY_STACK_SELECTED="false"
+  if [[ "$FIELDSTATION_ONLY" == "1" ]]; then
+    return
+  fi
+  if [[ -f "$CONFIG_FILE" ]]; then
+    local existing
+    existing="$(config_section_value_file "$CONFIG_FILE" compatibility optional_stack_enabled)"
+    if [[ -n "$existing" ]]; then
+      COMPATIBILITY_STACK_SELECTED="$existing"
+    else
+      COMPATIBILITY_STACK_SELECTED="true"
+    fi
+    return
+  fi
+  if [[ "$WIZARD" == "1" && -t 0 ]]; then
+    echo
+    echo "Install mode:"
+    echo "  1. FieldStation only - recommended for new kiosk/operator installs"
+    echo "  2. FieldStation plus optional compatibility tooling"
+    choice="$(ask "Choose install mode" "1")"
+    case "$choice" in
+      2) COMPATIBILITY_STACK_SELECTED="true" ;;
+      *) COMPATIBILITY_STACK_SELECTED="false"; FIELDSTATION_ONLY=1 ;;
+    esac
+  else
+    FIELDSTATION_ONLY=1
+    COMPATIBILITY_STACK_SELECTED="false"
   fi
 }
 
@@ -511,19 +588,43 @@ write_config() {
     return
   fi
   if [[ "$DRY_RUN" == "1" ]]; then
-    log "Would run setup wizard and write generated config to $CONFIG_FILE"
+    if compatibility_stack_enabled; then
+      log "Would write generated config to $CONFIG_FILE with optional compatibility tooling enabled"
+    else
+      log "Would write generated FieldStation-only config to $CONFIG_FILE"
+    fi
     return
   fi
   optional_tailscale_setup
-  choose_connection
+  if compatibility_stack_enabled; then
+    choose_connection
+  else
+    CONNECTION_TYPE="skip"
+    SERIAL_DEVICE=""
+    TCP_HOST=""
+    TCP_PORT="4403"
+  fi
   choose_access_mode
   optional_wifi_setup
-  optional_mqtt_setup
+  if compatibility_stack_enabled; then
+    optional_mqtt_setup
+  else
+    MQTT_ENABLED="false"
+    MQTT_REBROADCAST="false"
+    MQTT_BROKER=""
+    MQTT_USERNAME=""
+    MQTT_PASSWORD_FILE="/etc/meshmon-companion/secrets/mqtt-password"
+  fi
   HOSTNAME_LABEL="$(ask "Display name for this Pi" "example-node")"
-  MESH_PORT="$(choose_port "Compatibility dashboard port" "8080")"
   CONTROL_PORT="$(choose_port "FieldStation host control panel port" "8090")"
   FIELDSTATION_PORT="$(choose_port "FieldStation port" "8091")"
-  VIRTUAL_PORT="$(choose_port "Compatibility virtual node port" "4404")"
+  if compatibility_stack_enabled; then
+    MESH_PORT="$(choose_port "Compatibility dashboard port" "8080")"
+    VIRTUAL_PORT="$(choose_port "Compatibility virtual node port" "4404")"
+  else
+    MESH_PORT="8080"
+    VIRTUAL_PORT="4404"
+  fi
   run mkdir -p "$CONFIG_DIR"
   cat > "$CONFIG_FILE" <<EOF
 hostname_label: $HOSTNAME_LABEL
@@ -544,6 +645,8 @@ fieldstation:
   serial_autodetect: true
   adapter_cache_seconds: 30
   read_timeout_seconds: 12
+compatibility:
+  optional_stack_enabled: $(compatibility_stack_enabled && printf 'true' || printf 'false')
 serial:
   connection_type: $CONNECTION_TYPE
   device: $SERIAL_DEVICE
@@ -617,11 +720,19 @@ install_fieldstation_venv() {
 }
 
 render_compose() {
-  run "$INSTALL_DIR/scripts/render-compose.sh"
+  if compatibility_stack_enabled; then
+    run "$INSTALL_DIR/scripts/render-compose.sh"
+  else
+    log "FieldStation-only mode: skipping optional compatibility compose render."
+  fi
   run "$INSTALL_DIR/scripts/render-fieldstation-env.sh"
 }
 
 start_stack() {
+  if ! compatibility_stack_enabled; then
+    log "FieldStation-only mode: skipping optional compatibility Docker stack."
+    return
+  fi
   if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
     log "Skipping optional compatibility Docker stack because Docker Compose is unavailable."
     return
@@ -677,6 +788,10 @@ meshmonitor_api_url() {
 wait_for_meshmonitor_api() {
   local url deadline
   [[ "$DRY_RUN" == "1" ]] && return
+  if ! compatibility_stack_enabled; then
+    log "FieldStation-only mode: skipping optional compatibility dashboard API wait."
+    return
+  fi
   if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
     log "Skipping compatibility dashboard API wait because Docker Compose is unavailable."
     return
@@ -715,12 +830,22 @@ print_install_summary() {
   log "Install/update summary"
   echo "Access mode: ${access_mode:-unknown}"
   echo "FieldStation:              http://${display_host}:${fieldstation_port}"
+  echo "FieldStation service:      fieldstation.service"
+  echo "FieldStation database:     $(config_section_value fieldstation database)"
+  echo "FieldStation environment:  /etc/default/fieldstation"
+  echo "FieldStation Python env:   $FIELDSTATION_VENV"
   echo "Host control panel:        http://${display_host}:${control_port}"
-  echo "Compatibility dashboard:   http://${display_host}:${mesh_port}"
+  if compatibility_stack_enabled; then
+    echo "Compatibility dashboard:   http://${display_host}:${mesh_port}"
+  else
+    echo "Compatibility dashboard:   not installed in FieldStation-only mode"
+  fi
   echo "SSH menu:      companion-menu"
   echo
   echo "Docker stack:"
-  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  if ! compatibility_stack_enabled; then
+    echo "Compatibility Docker stack skipped by install mode."
+  elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     run sh -c "cd '$INSTALL_DIR' && docker compose ps"
   else
     echo "Compatibility Docker stack skipped; Docker Compose is unavailable."
@@ -734,17 +859,28 @@ print_install_summary() {
 uninstall() {
   need_root
   log "Uninstalling services. Backups and config are left in place unless removed manually."
-  run sh -c "cd '$INSTALL_DIR' && docker compose down" 2>/dev/null || true
-  run systemctl disable --now meshmon-companion.service fieldstation.service meshmon-companion-backup.timer 2>/dev/null || true
-  run rm -f /etc/systemd/system/meshmon-companion.service /etc/systemd/system/fieldstation.service /etc/systemd/system/meshmon-companion-backup.service /etc/systemd/system/meshmon-companion-backup.timer
+  if compatibility_stack_enabled; then
+    run sh -c "cd '$INSTALL_DIR' && docker compose down" 2>/dev/null || true
+  else
+    log "FieldStation-only uninstall: optional compatibility Docker stack is left untouched."
+  fi
+  run systemctl disable --now fieldstation.service meshmon-companion.service meshmon-companion-backup.timer 2>/dev/null || true
+  if compatibility_stack_enabled; then
+    run rm -f /etc/systemd/system/meshmon-companion.service /etc/systemd/system/meshmon-companion-backup.service /etc/systemd/system/meshmon-companion-backup.timer
+  fi
+  run rm -f /etc/systemd/system/fieldstation.service
   run rm -f /etc/default/fieldstation
-  run rm -f /etc/sudoers.d/meshmon-companion /usr/local/bin/meshmon-companion /usr/local/bin/companion-menu
+  if compatibility_stack_enabled; then
+    run rm -f /etc/sudoers.d/meshmon-companion /usr/local/bin/meshmon-companion /usr/local/bin/companion-menu
+  fi
+  log "Preserving FieldStation database, backups, and local config. Remove them manually only after backup."
   run systemctl daemon-reload
 }
 
 main() {
   need_root
   detect_os
+  choose_install_mode
   if [[ "$MODE" == "uninstall" ]]; then
     uninstall
     exit 0
