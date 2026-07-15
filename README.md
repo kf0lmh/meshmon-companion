@@ -203,6 +203,8 @@ sudo bash install.sh
 - FieldStation local service, API, UI, and SQLite database
 - Managed FieldStation Python environment for the read-only USB adapter
 - Local host maintenance/control panel
+- Linux desktop launcher and `fieldstation-open` browser opener when a GUI is
+  available; headless hosts print the local URL instead
 - Optional compatibility Docker stack only when selected
 - SSH-friendly terminal menu: `companion-menu`
 - Health, backup, restore, diagnostics, and restart scripts
@@ -213,6 +215,7 @@ sudo bash install.sh
 ## Main Commands
 
 ```bash
+fieldstation-open
 meshmon-companion status
 companion-menu
 meshmon-companion menu

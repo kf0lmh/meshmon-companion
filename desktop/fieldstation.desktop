@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=FieldStation
+Comment=Open the local FieldStation operator interface
+Exec=fieldstation-open
+Terminal=false
+Categories=Network;Utility;
+StartupNotify=true

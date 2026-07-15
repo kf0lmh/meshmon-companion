@@ -330,7 +330,7 @@ install_packages() {
     run apt-get update
     run apt-get install -y python3
   fi
-  if ! python3 -m venv --help >/dev/null 2>&1; then
+  if ! python_venv_available; then
     run apt-get update
     run apt-get install -y python3-venv
   fi
@@ -342,6 +342,17 @@ install_packages() {
     run apt-get update
     run apt-get install -y whiptail
   fi
+}
+
+python_venv_available() {
+  local tmp
+  tmp="$(mktemp -d)"
+  if python3 -m venv "$tmp/venv" >/dev/null 2>&1; then
+    rm -rf "$tmp"
+    return 0
+  fi
+  rm -rf "$tmp"
+  return 1
 }
 
 choose_install_mode() {
@@ -694,6 +705,9 @@ install_files() {
   run install -o root -g root -m 0755 "$INSTALL_DIR/scripts/meshmon-companion.sh" /usr/local/bin/meshmon-companion
   run install -o root -g root -m 0755 "$INSTALL_DIR/scripts/companion-menu.sh" /usr/local/bin/companion-menu
   run install -o root -g root -m 0755 "$INSTALL_DIR/scripts/fieldstation-mode.sh" /usr/local/bin/fieldstation-mode
+  run install -o root -g root -m 0755 "$INSTALL_DIR/scripts/fieldstation-open.sh" /usr/local/bin/fieldstation-open
+  run install -d -o root -g root -m 0755 /usr/local/share/applications
+  run install -o root -g root -m 0644 "$INSTALL_DIR/desktop/fieldstation.desktop" /usr/local/share/applications/fieldstation.desktop
   run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/meshmon-companion.service" /etc/systemd/system/meshmon-companion.service
   run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/fieldstation.service" /etc/systemd/system/fieldstation.service
   run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/meshmon-companion-backup.service" /etc/systemd/system/meshmon-companion-backup.service
@@ -873,6 +887,8 @@ uninstall() {
   run rm -f /etc/systemd/system/fieldstation.service
   run rm -f /etc/default/fieldstation
   run rm -f /usr/local/bin/fieldstation-mode
+  run rm -f /usr/local/bin/fieldstation-open
+  run rm -f /usr/local/share/applications/fieldstation.desktop
   if compatibility_stack_enabled; then
     run rm -f /etc/sudoers.d/meshmon-companion /usr/local/bin/meshmon-companion /usr/local/bin/companion-menu
   fi
