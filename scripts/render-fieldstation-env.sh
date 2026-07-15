@@ -35,13 +35,19 @@ serial_autodetect="$(section_value fieldstation serial_autodetect "true")"
 adapter_cache_seconds="$(section_value fieldstation adapter_cache_seconds "30")"
 read_timeout_seconds="$(section_value fieldstation read_timeout_seconds "12")"
 serial_device="$(section_value serial device "")"
+serial_connection_type="$(section_value serial connection_type "usb")"
+serial_tcp_host="$(section_value serial tcp_host "")"
+serial_tcp_port="$(section_value serial tcp_port "4403")"
 
 mkdir -p "$(dirname "$OUT")"
 cat > "$OUT" <<EOF
 FIELDSTATION_BIND=$fieldstation_bind
 FIELDSTATION_PORT=$fieldstation_port
 FIELDSTATION_DB=$fieldstation_db
+FIELDSTATION_CONNECTION_TYPE=$serial_connection_type
 FIELDSTATION_SERIAL_PORT=$serial_device
+FIELDSTATION_NODE_HOST=$serial_tcp_host
+FIELDSTATION_NODE_PORT=$serial_tcp_port
 FIELDSTATION_ENABLE_MESHTASTIC=$read_only_usb_enabled
 FIELDSTATION_SERIAL_AUTODETECT=$serial_autodetect
 FIELDSTATION_ADAPTER_CACHE_SECONDS=$adapter_cache_seconds

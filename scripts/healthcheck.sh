@@ -34,7 +34,10 @@ def read_config():
         "fieldstation_database": "/opt/meshmon-companion/data/fieldstation/fieldstation.sqlite3",
         "fieldstation_read_timeout_seconds": "12",
         "compatibility_optional_stack_enabled": "false",
+        "serial_connection_type": "usb",
         "serial_device": "",
+        "serial_tcp_host": "",
+        "serial_tcp_port": "4403",
     }
     section = None
     try:
@@ -75,8 +78,14 @@ def read_config():
                 elif section == "serial" and ":" in stripped:
                     key, value = stripped.split(":", 1)
                     value = value.strip().strip('"')
-                    if key == "device":
+                    if key == "connection_type":
+                        values["serial_connection_type"] = value
+                    elif key == "device":
                         values["serial_device"] = value
+                    elif key == "tcp_host":
+                        values["serial_tcp_host"] = value
+                    elif key == "tcp_port":
+                        values["serial_tcp_port"] = value
                 elif section == "compatibility" and ":" in stripped:
                     key, value = stripped.split(":", 1)
                     value = value.strip().strip('"')
@@ -216,6 +225,9 @@ print(json.dumps({
         "adapter_state": fieldstation_adapter_state,
         "adapter_reason": fieldstation_adapter_reason,
         "adapter_error": fieldstation_adapter_error,
+        "adapter_transport": config["serial_connection_type"],
+        "configured_node_host": config["serial_tcp_host"] if config["serial_connection_type"] == "tcp" else None,
+        "configured_node_port": config["serial_tcp_port"] if config["serial_connection_type"] == "tcp" else None,
         "configured_serial_path": safe_device_path(config["serial_device"]),
         "selected_serial_path": safe_device_path(fieldstation_selected_serial_path),
         "serial_access_rw": os.access(fieldstation_selected_serial_path or config["serial_device"], os.R_OK | os.W_OK) if (fieldstation_selected_serial_path or config["serial_device"]) else False,

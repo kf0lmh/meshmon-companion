@@ -76,6 +76,12 @@ the node, and channel slot metadata. It does not transmit messages, change node
 configuration, program channels, expose PSKs/channel keys, mark messages as
 seen by the mesh, or mark recipient ACKs.
 
+For lab or workstation testing, FieldStation can also use a deliberately
+configured TCP serial bridge by setting `serial.connection_type: tcp` with
+`serial.tcp_host` and `serial.tcp_port`. TCP mode is still read-only inside
+FieldStation: sends remain local queue entries, and node config/channel writes
+are not performed.
+
 The installer adds the low-privilege service user to normal serial access
 groups and renders read-only adapter settings into `/etc/default/fieldstation`.
 No node, missing package, bad serial path, or permission problem is reported as

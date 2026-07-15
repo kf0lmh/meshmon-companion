@@ -21,12 +21,18 @@ class NodeAdapter:
     def __init__(self, configured_port="", previous_status=None):
         self.configured_port = configured_port
         self.previous_status = previous_status or {}
+        self.connection_type = os.environ.get("FIELDSTATION_CONNECTION_TYPE", "usb").strip().lower() or "usb"
+        self.node_host = os.environ.get("FIELDSTATION_NODE_HOST", "").strip()
+        self.node_port = positive_int(os.environ.get("FIELDSTATION_NODE_PORT"), 4403)
         self.client_enabled = truthy(os.environ.get("FIELDSTATION_ENABLE_MESHTASTIC", "0"))
         self.autodetect_enabled = truthy(os.environ.get("FIELDSTATION_SERIAL_AUTODETECT", "1"))
         self.read_timeout = positive_int(os.environ.get("FIELDSTATION_MESHTASTIC_READ_TIMEOUT"), 12)
         self.cache_seconds = positive_int(os.environ.get("FIELDSTATION_ADAPTER_CACHE_SECONDS"), 30)
 
     def status(self):
+        if self.connection_type == "tcp":
+            return self.tcp_status()
+
         serial_ports = discover_serial_ports() if self.autodetect_enabled else []
         selected_port = self.configured_port or (serial_ports[0] if serial_ports else "")
         now = utc_now()
@@ -120,6 +126,75 @@ class NodeAdapter:
                 "modem_preset": None,
                 "current_channel": None,
             },
+            "updated_at": now,
+        }
+
+    def tcp_status(self):
+        now = utc_now()
+        dependency = meshtastic_dependency()
+        previous_state = self.previous_status.get("state")
+        last_packet_at = self.previous_status.get("last_packet_at")
+        reconnect_attempts = int(self.previous_status.get("reconnect_attempts") or 0)
+
+        if not self.node_host:
+            state = "degraded"
+            reason = "tcp_host_missing"
+            detail = "TCP node adapter mode is selected, but no node host is configured."
+            error = "Set FIELDSTATION_NODE_HOST or serial.tcp_host in config."
+        elif not dependency["available"] or not dependency["tcp_interface_available"]:
+            state = "degraded"
+            reason = "missing_meshtastic_package"
+            detail = "TCP node adapter selected, but the Meshtastic Python client is not installed."
+            error = "Install or repair the FieldStation Python environment."
+        elif not self.client_enabled:
+            state = "degraded"
+            reason = "real_adapter_disabled"
+            detail = "TCP node adapter is configured, but real adapter mode is intentionally disabled."
+            error = "Enable FIELDSTATION_ENABLE_MESHTASTIC only for deliberate read-only testing."
+        else:
+            cached = self.cached_status(now)
+            if cached:
+                cached["connection_type"] = "tcp"
+                cached["adapter_strategy"] = "tcp_meshtastic_python"
+                cached["adapter_mode"] = "read_only_tcp"
+                cached["selected_port"] = f"{self.node_host}:{self.node_port}"
+                return cached
+            return self.read_meshtastic_status_tcp(dependency, now)
+
+        if state in ("connecting", "reconnecting"):
+            reconnect_attempts += 1
+        stale = is_stale(last_packet_at)
+        return {
+            "state": state,
+            "previous_state": previous_state,
+            "connection_type": "tcp",
+            "adapter_strategy": "tcp_meshtastic_python",
+            "selected_port": f"{self.node_host}:{self.node_port}" if self.node_host else "",
+            "detected_ports": [],
+            "serial_autodetect_enabled": False,
+            "dependency": dependency,
+            "real_client_enabled": self.client_enabled,
+            "adapter_mode": "read_only_tcp",
+            "read_only": True,
+            "live_mode_available": False,
+            "read_only_live_available": False,
+            "telemetry_live": False,
+            "tx_available": False,
+            "message_receipts_available": False,
+            "reason": reason,
+            "permission_warning": "",
+            "reconnect_attempts": reconnect_attempts,
+            "last_successful_connection_at": self.previous_status.get("last_successful_connection_at"),
+            "last_successful_read_at": self.previous_status.get("last_successful_read_at"),
+            "last_error": error,
+            "last_packet_at": last_packet_at,
+            "stale": stale,
+            "offline": state != "connected",
+            "error": error,
+            "detail": detail,
+            "local_node": fallback_local_node(),
+            "known_nodes": [],
+            "read_only_channels": [],
             "updated_at": now,
         }
 
@@ -225,6 +300,146 @@ class NodeAdapter:
                 except Exception:
                     pass
 
+    def read_meshtastic_status_tcp(self, dependency, now):
+        iface = None
+        try:
+            from meshtastic.tcp_interface import TCPInterface
+
+            iface = TCPInterface(self.node_host, portNumber=self.node_port, timeout=self.read_timeout)
+            return self.read_status_from_interface(
+                iface,
+                dependency,
+                now,
+                connection_type="tcp",
+                adapter_strategy="tcp_meshtastic_python",
+                adapter_mode="read_only_tcp",
+                selected_port=f"{self.node_host}:{self.node_port}",
+                detected_ports=[],
+                serial_autodetect_enabled=False,
+                detail="Read-only TCP adapter is connected. Transmit and config writes are disabled.",
+            )
+        except Exception as exc:
+            return self.read_error_status(
+                exc,
+                dependency,
+                now,
+                connection_type="tcp",
+                adapter_strategy="tcp_meshtastic_python",
+                adapter_mode="read_only_tcp",
+                selected_port=f"{self.node_host}:{self.node_port}",
+                detected_ports=[],
+                serial_autodetect_enabled=False,
+                detail="Read-only Meshtastic adapter failed to read the TCP node bridge.",
+            )
+        finally:
+            if iface is not None:
+                try:
+                    iface.close()
+                except Exception:
+                    pass
+
+    def read_status_from_interface(
+        self,
+        iface,
+        dependency,
+        now,
+        connection_type,
+        adapter_strategy,
+        adapter_mode,
+        selected_port,
+        detected_ports,
+        serial_autodetect_enabled,
+        detail,
+    ):
+        my_info = safe_call(iface.getMyNodeInfo)
+        my_user = safe_call(iface.getMyUser)
+        nodes = extract_known_nodes(getattr(iface, "nodes", {}) or {}, now)
+        local_node = extract_local_node(my_info, my_user, now)
+        if local_node["node_id"] and all(node["node_id"] != local_node["node_id"] for node in nodes):
+            nodes.insert(0, local_node)
+        telemetry_live = has_telemetry(local_node) or any(has_telemetry(node) for node in nodes)
+        channels = extract_channels(getattr(getattr(iface, "localNode", None), "channels", None))
+        return {
+            "state": "connected",
+            "previous_state": self.previous_status.get("state"),
+            "connection_type": connection_type,
+            "adapter_strategy": adapter_strategy,
+            "adapter_mode": adapter_mode,
+            "selected_port": selected_port,
+            "detected_ports": detected_ports,
+            "serial_autodetect_enabled": serial_autodetect_enabled,
+            "dependency": dependency,
+            "real_client_enabled": self.client_enabled,
+            "read_only": True,
+            "live_mode_available": True,
+            "read_only_live_available": True,
+            "telemetry_live": telemetry_live,
+            "tx_available": False,
+            "message_receipts_available": False,
+            "reason": "read_only_ok",
+            "permission_warning": "",
+            "reconnect_attempts": 0,
+            "last_successful_connection_at": now,
+            "last_successful_read_at": now,
+            "last_error": "",
+            "last_packet_at": now,
+            "stale": False,
+            "offline": False,
+            "error": "",
+            "detail": detail,
+            "local_node": local_node,
+            "known_nodes": nodes,
+            "read_only_channels": channels,
+            "updated_at": now,
+        }
+
+    def read_error_status(
+        self,
+        exc,
+        dependency,
+        now,
+        connection_type,
+        adapter_strategy,
+        adapter_mode,
+        selected_port,
+        detected_ports,
+        serial_autodetect_enabled,
+        detail,
+    ):
+        return {
+            "state": "degraded",
+            "previous_state": self.previous_status.get("state"),
+            "connection_type": connection_type,
+            "adapter_strategy": adapter_strategy,
+            "adapter_mode": adapter_mode,
+            "selected_port": selected_port,
+            "detected_ports": detected_ports,
+            "serial_autodetect_enabled": serial_autodetect_enabled,
+            "dependency": dependency,
+            "real_client_enabled": self.client_enabled,
+            "read_only": True,
+            "live_mode_available": False,
+            "read_only_live_available": False,
+            "telemetry_live": False,
+            "tx_available": False,
+            "message_receipts_available": False,
+            "reason": "read_only_error",
+            "permission_warning": "",
+            "reconnect_attempts": int(self.previous_status.get("reconnect_attempts") or 0) + 1,
+            "last_successful_connection_at": self.previous_status.get("last_successful_connection_at"),
+            "last_successful_read_at": self.previous_status.get("last_successful_read_at"),
+            "last_error": str(exc),
+            "last_packet_at": self.previous_status.get("last_packet_at"),
+            "stale": True,
+            "offline": True,
+            "error": str(exc),
+            "detail": detail,
+            "local_node": fallback_local_node(),
+            "known_nodes": [],
+            "read_only_channels": [],
+            "updated_at": now,
+        }
+
     def send_text(self, channel_index, body):
         status = self.status()
         return {
@@ -253,6 +468,7 @@ def discover_serial_ports():
 def meshtastic_dependency():
     available = importlib.util.find_spec("meshtastic") is not None
     serial_available = importlib.util.find_spec("meshtastic.serial_interface") is not None if available else False
+    tcp_available = importlib.util.find_spec("meshtastic.tcp_interface") is not None if available else False
     version = None
     if available:
         try:
@@ -263,6 +479,7 @@ def meshtastic_dependency():
         "package": "meshtastic",
         "available": available,
         "serial_interface_available": serial_available,
+        "tcp_interface_available": tcp_available,
         "version": version,
     }
 
