@@ -3,6 +3,15 @@ set -euo pipefail
 
 CONFIG="${MESHMON_COMPANION_CONFIG:-/etc/meshmon-companion/config.yaml}"
 
+if [[ ! -r "$CONFIG" && "$(id -u)" != "0" ]]; then
+  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    exec sudo -n env MESHMON_COMPANION_CONFIG="$CONFIG" "$0" "$@"
+  fi
+  echo "Config not readable: $CONFIG" >&2
+  echo "Try: sudo fieldstation-mode $*" >&2
+  exit 1
+fi
+
 python3 - "$CONFIG" "$@" <<'PY'
 import argparse
 import os
