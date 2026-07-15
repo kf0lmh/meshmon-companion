@@ -212,6 +212,8 @@ class NodeAdapter:
         cached["message_receipts_available"] = False
         cached["adapter_mode"] = self.live_adapter_mode(cached.get("connection_type", "usb"))
         cached["read_only"] = not self.tx_enabled
+        cached["reason"] = "manual_tx_ok" if self.tx_enabled else "read_only_ok"
+        cached["detail"] = self.live_adapter_detail(str(cached.get("connection_type", "usb")).upper())
         cached["offline"] = False
         return cached
 
