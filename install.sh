@@ -498,6 +498,7 @@ choose_access_mode() {
   TAILSCALE_ENABLED="false"
   TAILSCALE_IP="$ts_ip"
   [[ -n "$ts_ip" ]] && TAILSCALE_ENABLED="true"
+  return 0
 }
 
 optional_tailscale_setup() {
