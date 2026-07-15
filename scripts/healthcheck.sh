@@ -94,6 +94,7 @@ ts_ip = out(["bash", "-lc", "command -v tailscale >/dev/null && tailscale ip -4 
 serial_present = any(os.path.exists(p) for p in ["/dev/serial/by-id"] + [f"/dev/ttyACM{i}" for i in range(4)] + [f"/dev/ttyUSB{i}" for i in range(4)])
 config = read_config()
 compatibility_enabled = str(config["compatibility_optional_stack_enabled"]).lower() in ("true", "1", "yes", "on")
+install_mode = "compatibility-enabled" if compatibility_enabled else "fieldstation-only"
 optional_compatibility_stack_present = docker == "active"
 mesh_host = config["control_bind"]
 if mesh_host in ("", "0.0.0.0", "::"):
@@ -184,6 +185,7 @@ if throttled and throttled != "throttled=0x0": errors.append("Power throttling/u
 overall = "critical" if errors else ("warning" if warnings else "healthy")
 print(json.dumps({
     "overall": overall,
+    "install_mode": install_mode,
     "errors": errors,
     "warnings": warnings,
     "system": {"hostname": socket.gethostname(), "uptime": out(["uptime", "-p"]), "load": out(["bash", "-lc", "cut -d' ' -f1-3 /proc/loadavg"])},
@@ -200,6 +202,7 @@ print(json.dumps({
     "serial": {"present": serial_present},
     "fieldstation": {
         "enabled": fieldstation_enabled,
+        "install_mode": install_mode,
         "fieldstation_service_ok": fieldstation_service == "active",
         "bind": config["fieldstation_bind"] or config["control_bind"],
         "port": config["fieldstation_port"],
@@ -228,6 +231,8 @@ print(json.dumps({
     },
     "compatibility": {
         "optional_stack_enabled": compatibility_enabled,
+        "install_mode": install_mode,
+        "optional_compatibility_stack_enabled": compatibility_enabled,
         "optional_compatibility_stack_present": optional_compatibility_stack_present,
         "optional_compatibility_stack_ok": (api == "ok") if compatibility_enabled else None,
         "dashboard_api": api if compatibility_enabled else "disabled",

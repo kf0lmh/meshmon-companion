@@ -38,6 +38,10 @@ Phase 6C status:
 - Docker, the optional dashboard, and serial bridge containers are not required
   in FieldStation-only mode. Healthcheck reports optional compatibility health
   separately from FieldStation service/API/database health.
+- Existing installs can use `fieldstation-mode status`,
+  `fieldstation-mode set fieldstation-only`, and
+  `fieldstation-mode set compatibility-enabled` to update install-mode config
+  safely. The helper backs up config before writes and does not delete data.
 
 ## Historical Repo Findings
 

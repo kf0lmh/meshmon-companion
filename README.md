@@ -250,6 +250,23 @@ FieldStation service name, database path, environment path, managed Python
 environment path, health status, and optional compatibility status when that
 stack is enabled.
 
+## Changing Install Mode
+
+Existing installs can be marked as FieldStation-only or compatibility-enabled
+without hand-editing the local config:
+
+```bash
+fieldstation-mode status
+sudo fieldstation-mode set fieldstation-only --dry-run
+sudo fieldstation-mode set fieldstation-only
+sudo fieldstation-mode set compatibility-enabled
+```
+
+The helper changes only local config keys, creates a timestamped backup before
+writing, and preserves FieldStation data, optional compatibility data, backups,
+and unknown config keys. Run the follow-up update command printed by the helper
+to apply service changes.
+
 ## Security Defaults
 
 FieldStation is meant to be safe by default for small field deployments:

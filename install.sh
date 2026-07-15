@@ -692,6 +692,7 @@ install_files() {
   run chmod 755 "$INSTALL_DIR"/scripts/*.sh
   run install -o root -g root -m 0755 "$INSTALL_DIR/scripts/meshmon-companion.sh" /usr/local/bin/meshmon-companion
   run install -o root -g root -m 0755 "$INSTALL_DIR/scripts/companion-menu.sh" /usr/local/bin/companion-menu
+  run install -o root -g root -m 0755 "$INSTALL_DIR/scripts/fieldstation-mode.sh" /usr/local/bin/fieldstation-mode
   run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/meshmon-companion.service" /etc/systemd/system/meshmon-companion.service
   run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/fieldstation.service" /etc/systemd/system/fieldstation.service
   run install -o root -g root -m 0644 "$INSTALL_DIR/systemd/meshmon-companion-backup.service" /etc/systemd/system/meshmon-companion-backup.service
@@ -870,6 +871,7 @@ uninstall() {
   fi
   run rm -f /etc/systemd/system/fieldstation.service
   run rm -f /etc/default/fieldstation
+  run rm -f /usr/local/bin/fieldstation-mode
   if compatibility_stack_enabled; then
     run rm -f /etc/sudoers.d/meshmon-companion /usr/local/bin/meshmon-companion /usr/local/bin/companion-menu
   fi
