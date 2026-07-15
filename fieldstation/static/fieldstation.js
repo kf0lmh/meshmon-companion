@@ -159,7 +159,8 @@ function setConnection(status) {
   const connection = status.connection;
   els.connectionState.textContent = connection.state;
   els.connectionState.className = `status-pill ${connection.state}`;
-  els.connectionPort.textContent = `USB: ${connection.selected_port || 'not selected'}`;
+  const transport = connection.connection_type === 'tcp' ? 'TCP' : 'USB';
+  els.connectionPort.textContent = `${transport}: ${connection.selected_port || 'not selected'}`;
   const localDisplay = connection.local_node.display_name || connection.local_node.node_name || 'unavailable';
   els.localNode.textContent = `Local node: ${localDisplay}`;
   els.lastPacket.textContent = `Last packet: ${formatTime(connection.last_packet_at)}`;
@@ -179,7 +180,7 @@ function setConnection(status) {
     ? 'Node connected/read-only'
     : `${connection.state} mode`;
   els.offlineText.textContent = connection.state === 'connected'
-    ? 'FieldStation is reading live USB node status. Sending, seen-by-mesh, recipient ACKs, and node configuration writes remain disabled.'
+    ? 'FieldStation is reading live node status. Sending, seen-by-mesh, recipient ACKs, and node configuration writes remain disabled.'
     : `${connection.detail} Queued messages are local only; live telemetry, seen-by-mesh, and recipient ACKs are unavailable.`;
 }
 
@@ -315,7 +316,7 @@ function populateWaypointOptions() {
 
 function renderMapStatus(status) {
   state.mapStatus = status;
-  els.mapModeText.textContent = `${status.region} | ${status.mode.replace(/_/g, ' ')} | no internet required`;
+  els.mapModeText.textContent = `${status.region} | coordinate plot placeholder | no basemap or internet tiles`;
   populateWaypointOptions();
 }
 
@@ -500,24 +501,149 @@ function renderNetSessions(payload) {
 function renderNetEntries(entries) {
   state.netLogEntries = entries;
   els.netLogEntries.innerHTML = '';
-  if (!entries.length) {
-    els.netLogEntries.innerHTML = '<div class="empty-state">No net log entries yet.</div>';
-    return;
-  }
+  els.netLogEntries.appendChild(netLogHeader());
   entries.forEach((entry) => {
-    const row = document.createElement('div');
-    row.className = `netlog-row ${entry.source}`;
-    row.innerHTML = `
-      <div>
-        <strong>${escapeHtml(formatTime(entry.timestamp))}</strong>
-        <span>${escapeHtml(entry.entry_type)} | ${escapeHtml(entry.source)}</span>
-      </div>
-      <div>${escapeHtml(entry.from_display || 'FieldStation')} ${entry.to_display ? `-> ${escapeHtml(entry.to_display)}` : ''}</div>
-      <div>${escapeHtml(entry.channel_label || '')}</div>
-      <div>${escapeHtml(entry.message)}</div>
-    `;
-    els.netLogEntries.appendChild(row);
+    els.netLogEntries.appendChild(netLogRow(entry));
   });
+  els.netLogEntries.appendChild(netLogNewRow());
+}
+
+function netLogHeader() {
+  const row = document.createElement('div');
+  row.className = 'netlog-grid-row netlog-header';
+  row.innerHTML = '<div>Time</div><div>Type</div><div>From</div><div>To</div><div>Channel</div><div>Message / Notes</div>';
+  return row;
+}
+
+function netLogRow(entry) {
+  const row = document.createElement('div');
+  row.className = `netlog-grid-row ${entry.source === 'automatic' ? 'automatic' : ''}`;
+  row.appendChild(netLogStaticCell(formatTime(entry.timestamp), 'time'));
+  row.appendChild(netLogSelectCell(entry, 'entry_type', entry.entry_type, NET_ENTRY_TYPES));
+  row.appendChild(netLogTextCell(entry, 'from_node_name', entry.from_node_name || ''));
+  row.appendChild(netLogTextCell(entry, 'to_node_name', entry.to_node_name || ''));
+  row.appendChild(netLogChannelCell(entry, entry.channel_index));
+  row.appendChild(netLogTextCell(entry, 'message', entry.message, true));
+  return row;
+}
+
+function netLogNewRow() {
+  const row = document.createElement('div');
+  row.className = 'netlog-grid-row netlog-new-row';
+  row.appendChild(netLogStaticCell('auto', 'time'));
+  row.appendChild(netLogNewSelect('entry_type', NET_ENTRY_TYPES, 'operator note'));
+  row.appendChild(netLogNewInput('from_node_name', ''));
+  row.appendChild(netLogNewInput('to_node_name', ''));
+  row.appendChild(netLogNewChannel());
+  row.appendChild(netLogNewInput('message', 'Type first entry here'));
+  return row;
+}
+
+function netLogStaticCell(text, extra = '') {
+  const cell = document.createElement('div');
+  cell.className = `netlog-cell ${extra}`;
+  cell.textContent = text || '';
+  return cell;
+}
+
+function netLogTextCell(entry, field, value, required = false) {
+  const input = document.createElement('input');
+  input.className = 'netlog-cell-input';
+  input.value = value || '';
+  input.addEventListener('change', async () => {
+    if (required && !input.value.trim()) {
+      input.value = value || '';
+      return;
+    }
+    const payload = {id: entry.id};
+    payload[field] = input.value;
+    await api('/api/net-log-entry-update', {method: 'POST', body: JSON.stringify(payload)});
+    await loadNetLogEntries();
+  });
+  return netLogInputCell(input);
+}
+
+function netLogSelectCell(entry, field, value, options) {
+  const select = document.createElement('select');
+  select.className = 'netlog-cell-input';
+  select.innerHTML = options.map((option) => (
+    `<option value="${escapeAttribute(option)}" ${option === value ? 'selected' : ''}>${escapeHtml(option)}</option>`
+  )).join('');
+  select.addEventListener('change', async () => {
+    const payload = {id: entry.id};
+    payload[field] = select.value;
+    await api('/api/net-log-entry-update', {method: 'POST', body: JSON.stringify(payload)});
+    await loadNetLogEntries();
+  });
+  return netLogInputCell(select);
+}
+
+function netLogChannelCell(entry, value) {
+  const select = document.createElement('select');
+  select.className = 'netlog-cell-input';
+  select.innerHTML = state.channels.map((channel) => (
+    `<option value="${channel.index}" ${Number(channel.index) === Number(value) ? 'selected' : ''}>${escapeHtml(channel.label)}</option>`
+  )).join('');
+  select.addEventListener('change', async () => {
+    await api('/api/net-log-entry-update', {
+      method: 'POST',
+      body: JSON.stringify({id: entry.id, channel_index: Number(select.value)}),
+    });
+    await loadNetLogEntries();
+  });
+  return netLogInputCell(select);
+}
+
+function netLogInputCell(input) {
+  const cell = document.createElement('div');
+  cell.className = 'netlog-cell';
+  cell.appendChild(input);
+  return cell;
+}
+
+function netLogNewInput(field, placeholder) {
+  const input = document.createElement('input');
+  input.className = 'netlog-cell-input';
+  input.dataset.field = field;
+  input.placeholder = placeholder;
+  input.addEventListener('change', createNetEntryFromRow);
+  return netLogInputCell(input);
+}
+
+function netLogNewSelect(field, options, value) {
+  const select = document.createElement('select');
+  select.className = 'netlog-cell-input';
+  select.dataset.field = field;
+  select.innerHTML = options.map((option) => (
+    `<option value="${escapeAttribute(option)}" ${option === value ? 'selected' : ''}>${escapeHtml(option)}</option>`
+  )).join('');
+  select.addEventListener('change', createNetEntryFromRow);
+  return netLogInputCell(select);
+}
+
+function netLogNewChannel() {
+  const select = document.createElement('select');
+  select.className = 'netlog-cell-input';
+  select.dataset.field = 'channel_index';
+  const activeChannel = state.activeNetSession?.active_channel_index ?? 0;
+  select.innerHTML = state.channels.map((channel) => (
+    `<option value="${channel.index}" ${Number(channel.index) === Number(activeChannel) ? 'selected' : ''}>${escapeHtml(channel.label)}</option>`
+  )).join('');
+  select.addEventListener('change', createNetEntryFromRow);
+  return netLogInputCell(select);
+}
+
+async function createNetEntryFromRow(event) {
+  const row = event.currentTarget.closest('.netlog-new-row');
+  if (!row || row.dataset.saving === 'true' || !state.activeNetSession) return;
+  const payload = {net_session_id: state.activeNetSession.id};
+  row.querySelectorAll('[data-field]').forEach((input) => {
+    payload[input.dataset.field] = input.dataset.field === 'channel_index' ? Number(input.value || 0) : input.value;
+  });
+  if (!String(payload.message || '').trim()) return;
+  row.dataset.saving = 'true';
+  await api('/api/net-log-entries', {method: 'POST', body: JSON.stringify(payload)});
+  await Promise.all([loadNetLogEntries(), loadEvents()]);
 }
 
 function renderChannelProfiles(profiles) {

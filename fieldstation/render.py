@@ -94,17 +94,21 @@ def page():
         <div class="map-toolbar">
           <div>
             <h2>Lincoln County, Missouri</h2>
-            <p id="mapModeText">Offline placeholder map. No internet tiles or live telemetry.</p>
+            <p id="mapModeText">Coordinate plot placeholder. No basemap, internet tiles, or live telemetry.</p>
           </div>
           <button id="addWaypointButton" class="small-button" type="button">Add Waypoint</button>
         </div>
-        <div id="offlineMap" class="offline-map" role="img" aria-label="Offline Lincoln County placeholder map">
+        <div id="offlineMap" class="offline-map" role="img" aria-label="Coordinate plot placeholder, not a basemap">
           <div class="map-grid"></div>
-          <div class="map-label">Offline map placeholder</div>
+          <div class="map-label">Coordinate plot - not a map</div>
+          <div class="map-axis north">N</div>
+          <div class="map-axis south">S</div>
+          <div class="map-axis west">W</div>
+          <div class="map-axis east">E</div>
           <div id="nodeMarkers" class="marker-layer"></div>
           <div id="waypointMarkers" class="marker-layer"></div>
         </div>
-        <p class="map-note">Click-to-coordinate will be enabled when real bundled map data is added. Use manual coordinates for this placeholder phase.</p>
+        <p class="map-note">This is only a coordinate plot against rough regional bounds. It is not a street, topo, or parcel map.</p>
       </section>
 
       <aside class="map-side">
@@ -191,7 +195,7 @@ def page():
           </form>
         </section>
 
-        <section class="panel-block">
+        <section class="panel-block net-entry-panel">
           <h2>Manual Entry</h2>
           <form id="netEntryForm" class="waypoint-form">
             <label>Time<input id="entryTimestamp" name="timestamp"></label>

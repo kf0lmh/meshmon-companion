@@ -16,7 +16,8 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font: 15px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -25,7 +26,8 @@ button, textarea, input {
   font: inherit;
 }
 .station-shell {
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   display: grid;
   grid-template-rows: auto auto auto 1fr;
 }
@@ -145,10 +147,11 @@ button, textarea, input {
   background: #18304a;
   color: var(--text);
 }
-.view-screen { display: none; }
+.view-screen { display: none; min-height: 0; overflow: hidden; }
 .view-screen.active { display: grid; }
 .workspace {
   min-height: 0;
+  height: 100%;
   grid-template-columns: minmax(0, 1fr) 360px;
 }
 .chat-panel {
@@ -289,6 +292,16 @@ button, textarea, input {
   padding: 12px;
   background: #12181b;
 }
+.side-panel .panel-block:nth-child(2) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(46vh, 520px);
+}
+.node-list {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
 .panel-block {
   margin-bottom: 12px;
   padding: 13px;
@@ -405,8 +418,7 @@ button, textarea, input {
   border: 1px solid var(--line);
   border-radius: 8px;
   background:
-    linear-gradient(135deg, rgba(115, 209, 197, 0.12), transparent 38%),
-    linear-gradient(45deg, rgba(143, 196, 255, 0.12), transparent 45%),
+    radial-gradient(circle at 50% 50%, rgba(143, 196, 255, 0.08), transparent 42%),
     #152023;
 }
 .map-grid {
@@ -416,6 +428,13 @@ button, textarea, input {
     linear-gradient(rgba(238, 244, 242, 0.08) 1px, transparent 1px),
     linear-gradient(90deg, rgba(238, 244, 242, 0.08) 1px, transparent 1px);
   background-size: 48px 48px;
+}
+.map-grid::after {
+  content: "";
+  position: absolute;
+  inset: 12%;
+  border: 1px dashed rgba(238, 244, 242, 0.18);
+  border-radius: 50%;
 }
 .map-label {
   position: absolute;
@@ -429,6 +448,16 @@ button, textarea, input {
   color: var(--warn);
   font-weight: 700;
 }
+.map-axis {
+  position: absolute;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.map-axis.north { top: 12px; left: 50%; transform: translateX(-50%); }
+.map-axis.south { bottom: 12px; left: 50%; transform: translateX(-50%); }
+.map-axis.west { left: 14px; top: 50%; transform: translateY(-50%); }
+.map-axis.east { right: 14px; top: 50%; transform: translateY(-50%); }
 .marker-layer {
   position: absolute;
   inset: 0;
@@ -474,26 +503,67 @@ button, textarea, input {
   gap: 7px;
 }
 .netlog-table {
-  display: grid;
-  gap: 8px;
-}
-.netlog-row {
-  display: grid;
-  grid-template-columns: 190px 160px 90px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  padding: 9px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--panel-2);
-}
-.netlog-row.automatic {
-  border-color: #365d54;
-}
-.netlog-row span {
   display: block;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #101619;
+}
+.netlog-grid-row {
+  display: grid;
+  grid-template-columns: 170px 170px 160px 160px 130px minmax(300px, 1fr);
+  min-width: 1090px;
+  border-bottom: 1px solid var(--line);
+}
+.netlog-grid-row:last-child { border-bottom: 0; }
+.netlog-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #182126;
   color: var(--muted);
   font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.netlog-grid-row.automatic {
+  background: rgba(54, 93, 84, 0.18);
+}
+.netlog-new-row {
+  background: #141d21;
+}
+.netlog-cell,
+.netlog-header div {
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px;
+  border-right: 1px solid var(--line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.netlog-cell:last-child,
+.netlog-header div:last-child { border-right: 0; }
+.netlog-cell.time {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.netlog-cell-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+}
+.netlog-cell-input:focus {
+  outline: 0;
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+.net-entry-panel {
+  display: none;
 }
 .settings-screen {
   grid-template-columns: minmax(0, 720px);
@@ -650,6 +720,9 @@ button, textarea, input {
   }
   .netlog-row {
     grid-template-columns: 1fr;
+  }
+  .netlog-grid-row {
+    grid-template-columns: 145px 150px 140px 140px 120px minmax(260px, 1fr);
   }
   .offline-map {
     min-height: 420px;

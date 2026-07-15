@@ -279,6 +279,14 @@ class Handler(BaseHTTPRequestHandler):
                 repo = self.repo_or_503()
                 if repo:
                     self.send_json({"entry": repo.add_net_log_entry(payload)}, 201)
+            elif path == "/api/net-log-entry-update":
+                entry_id = payload.get("id")
+                if entry_id is None:
+                    self.send_json({"error": "id is required"}, 400)
+                    return
+                repo = self.repo_or_503()
+                if repo:
+                    self.send_json({"entry": repo.update_net_log_entry(entry_id, payload)})
             elif path == "/api/ics309-export":
                 repo = self.repo_or_503()
                 if repo:

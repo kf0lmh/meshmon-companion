@@ -846,6 +846,7 @@ class FieldStationRepository:
                 "net_session_id": session_id,
                 "timestamp": start_time,
                 "entry_type": "operator note",
+                "channel_index": session["active_channel_index"],
                 "message": f"Started net session {session['net_name']}",
                 "source": "automatic",
             }
@@ -950,6 +951,44 @@ class FieldStationRepository:
                 ),
             )
         return self.net_log_entry(cursor.lastrowid)
+
+    def update_net_log_entry(self, entry_id, payload):
+        entry = self.net_log_entry(entry_id)
+        if not entry:
+            raise KeyError("Net log entry not found")
+        updates = {}
+        if "entry_type" in payload:
+            entry_type = str(payload.get("entry_type") or "").strip()
+            if entry_type not in ENTRY_TYPES:
+                raise ValueError(f"entry_type must be one of: {', '.join(ENTRY_TYPES)}")
+            updates["entry_type"] = entry_type
+        for key in ("from_node_name", "from_tactical_callsign", "to_node_name", "to_tactical_callsign"):
+            if key in payload:
+                updates[key] = str(payload.get(key) or "").strip()
+        if "channel_index" in payload:
+            channel_index = int(payload.get("channel_index"))
+            updates["channel_index"] = channel_index
+            updates["channel_name"] = self.channel_name(channel_index)
+        if "message" in payload:
+            message = str(payload.get("message") or "").strip()
+            if not message:
+                raise ValueError("message is required")
+            updates["message"] = message[:1000]
+        if not updates:
+            return entry
+        assignments = ", ".join(f"{key} = ?" for key in updates)
+        values = list(updates.values())
+        values.append(int(entry_id))
+        with self._connect() as conn:
+            conn.execute(
+                f"""
+                UPDATE net_log_entries
+                SET {assignments}
+                WHERE id = ?
+                """,
+                values,
+            )
+        return self.net_log_entry(entry_id)
 
     def net_log_entry(self, entry_id):
         with self._connect() as conn:
