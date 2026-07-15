@@ -37,6 +37,7 @@ mkdir -p "$OUT"
 python3 - "$LOCATION" "$RADIUS_MILES" "$ZOOM_MIN" "$ZOOM_MAX" "$OUT" <<'PY'
 import json
 import math
+import re
 import sys
 import time
 import urllib.error
@@ -64,7 +65,10 @@ def fetch_json(url):
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
 
-query = urllib.parse.urlencode({"format": "jsonv2", "limit": "1", "q": location})
+query_args = {"format": "jsonv2", "limit": "1", "q": location}
+if re.fullmatch(r"\d{5}(-\d{4})?", location.strip()):
+    query_args["countrycodes"] = "us"
+query = urllib.parse.urlencode(query_args)
 matches = fetch_json(f"https://nominatim.openstreetmap.org/search?{query}")
 if not matches:
     raise SystemExit(f"Could not find map center for: {location}")
