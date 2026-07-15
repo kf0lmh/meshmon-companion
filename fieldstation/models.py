@@ -6,6 +6,7 @@ MESSAGE_STATUSES = {
     "acked_by_recipient": "ACKed by recipient",
     "failed": "Failed",
     "retry_available": "Retry available",
+    "canceled": "Canceled",
     "logged": "Logged",
 }
 
@@ -17,6 +18,7 @@ MESSAGE_STATUS_TONES = {
     "acked_by_recipient": "acked",
     "failed": "failed",
     "retry_available": "retry",
+    "canceled": "canceled",
     "logged": "logged",
 }
 

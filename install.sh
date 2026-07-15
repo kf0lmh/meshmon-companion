@@ -176,8 +176,13 @@ config_section_value_file() {
   local file="$1" section="$2" key="$3"
   awk -v section="$section" -v key="$key" '
     $0 ~ "^[^[:space:]].*:$" { current=$1; sub(/:$/, "", current) }
-    current == section && $1 == key ":" { print $2; exit }
-  ' "$file" 2>/dev/null | tr -d '"'
+    current == section && $1 == key ":" {
+      sub("^[^:]+:[[:space:]]*", "", $0)
+      gsub(/^"|"$/, "", $0)
+      print
+      exit
+    }
+  ' "$file" 2>/dev/null
 }
 
 compatibility_stack_enabled() {
@@ -242,6 +247,13 @@ ask_secret() {
   read -r -s -p "$prompt: " answer
   printf '\n' >&2
   printf '%s\n' "$answer"
+}
+
+yaml_quote() {
+  local value="${1:-}"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
 }
 
 port_available() {
@@ -512,6 +524,39 @@ choose_access_mode() {
   return 0
 }
 
+choose_offline_map_area() {
+  MAP_DOWNLOAD_ENABLED="false"
+  MAP_LOCATION=""
+  MAP_RADIUS_MILES="10"
+  MAP_ZOOM_MIN="10"
+  MAP_ZOOM_MAX="13"
+  if [[ "$WIZARD" != "1" || ! -t 0 ]]; then
+    return
+  fi
+  echo
+  echo "Offline map package:"
+  echo "FieldStation can download a local OpenStreetMap raster tile package during install."
+  echo "Leave location blank to skip this for now."
+  MAP_LOCATION="$(ask "Map center location/address" "")"
+  if [[ -z "$MAP_LOCATION" ]]; then
+    return
+  fi
+  MAP_RADIUS_MILES="$(ask "Map radius in miles" "10")"
+  if ! python3 - "$MAP_RADIUS_MILES" <<'PY'
+import sys
+try:
+    radius = float(sys.argv[1])
+except ValueError:
+    sys.exit(1)
+sys.exit(0 if 0 < radius <= 50 else 1)
+PY
+  then
+    echo "Map radius must be greater than 0 and no more than 50 miles." >&2
+    exit 1
+  fi
+  MAP_DOWNLOAD_ENABLED="true"
+}
+
 optional_tailscale_setup() {
   if command -v tailscale >/dev/null 2>&1 && tailscale ip -4 >/dev/null 2>&1; then
     return
@@ -617,6 +662,7 @@ write_config() {
     TCP_PORT="4403"
   fi
   choose_access_mode
+  choose_offline_map_area
   optional_wifi_setup
   if compatibility_stack_enabled; then
     optional_mqtt_setup
@@ -658,6 +704,13 @@ fieldstation:
   serial_autodetect: true
   adapter_cache_seconds: 30
   read_timeout_seconds: 12
+offline_map:
+  enabled: $MAP_DOWNLOAD_ENABLED
+  location: $(yaml_quote "$MAP_LOCATION")
+  radius_miles: $MAP_RADIUS_MILES
+  zoom_min: $MAP_ZOOM_MIN
+  zoom_max: $MAP_ZOOM_MAX
+  source: openstreetmap
 compatibility:
   optional_stack_enabled: $(compatibility_stack_enabled && printf 'true' || printf 'false')
 serial:
@@ -743,6 +796,35 @@ render_compose() {
     log "FieldStation-only mode: skipping optional compatibility compose render."
   fi
   run "$INSTALL_DIR/scripts/render-fieldstation-env.sh"
+}
+
+install_offline_map() {
+  local enabled location radius map_path zoom_min zoom_max manifest
+  enabled="$(config_section_value_file "$CONFIG_FILE" offline_map enabled)"
+  location="$(config_section_value_file "$CONFIG_FILE" offline_map location)"
+  radius="$(config_section_value_file "$CONFIG_FILE" offline_map radius_miles)"
+  zoom_min="$(config_section_value_file "$CONFIG_FILE" offline_map zoom_min)"
+  zoom_max="$(config_section_value_file "$CONFIG_FILE" offline_map zoom_max)"
+  map_path="$(config_section_value_file "$CONFIG_FILE" fieldstation offline_map_path)"
+  map_path="${map_path:-$INSTALL_DIR/data/fieldstation/maps}"
+  manifest="$map_path/manifest.json"
+  if ! truthy "$enabled" || [[ -z "$location" ]]; then
+    log "Offline map download skipped."
+    return
+  fi
+  if [[ -f "$manifest" ]]; then
+    log "Offline map package already present: $manifest"
+    return
+  fi
+  log "Downloading offline FieldStation map package for configured area."
+  if ! run "$INSTALL_DIR/scripts/download-fieldstation-map.sh" \
+    --location "$location" \
+    --radius-miles "${radius:-10}" \
+    --zoom-min "${zoom_min:-10}" \
+    --zoom-max "${zoom_max:-13}" \
+    --out "$map_path"; then
+    echo "Warning: offline map download failed; FieldStation will continue with the placeholder map." >&2
+  fi
 }
 
 start_stack() {
@@ -911,6 +993,7 @@ main() {
   install_fieldstation_venv
   write_config
   render_compose
+  install_offline_map
   start_stack
   enable_services
   wait_for_meshmonitor_api

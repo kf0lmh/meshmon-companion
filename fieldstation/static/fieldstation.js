@@ -9,6 +9,7 @@ const state = {
   activeNetSession: null,
   netSessions: [],
   netLogEntries: [],
+  mapView: {scale: 1, x: 0, y: 0, dragging: false, dragStartX: 0, dragStartY: 0, startX: 0, startY: 0},
 };
 
 const NET_ENTRY_TYPES = [
@@ -68,6 +69,14 @@ const els = {
   refreshButton: document.getElementById('refreshButton'),
   fullscreenButton: document.getElementById('fullscreenButton'),
   mapModeText: document.getElementById('mapModeText'),
+  mapLabel: document.getElementById('mapLabel'),
+  mapNote: document.getElementById('mapNote'),
+  offlineMap: document.getElementById('offlineMap'),
+  mapPanLayer: document.getElementById('mapPanLayer'),
+  mapTiles: document.getElementById('mapTiles'),
+  mapZoomIn: document.getElementById('mapZoomIn'),
+  mapZoomOut: document.getElementById('mapZoomOut'),
+  mapReset: document.getElementById('mapReset'),
   nodeMarkers: document.getElementById('nodeMarkers'),
   waypointMarkers: document.getElementById('waypointMarkers'),
   addWaypointButton: document.getElementById('addWaypointButton'),
@@ -226,18 +235,34 @@ function renderMessages(messages) {
     const receiptNote = message.status === 'queued_local'
       ? '<span class="local-note">local only, not sent to mesh</span>'
       : '';
+    const canCancel = ['queued_local', 'retry_available'].includes(message.status);
     article.innerHTML = `
       <div class="message-meta">
         <span>${escapeHtml(message.sender_display)} | ${escapeHtml(message.channel_label)} | ${formatTime(message.timestamp)}</span>
-        <span class="status-badge ${escapeHtml(message.status_tone || '')}">${escapeHtml(message.status_label)}</span>
+        <span class="message-actions">
+          <span class="status-badge ${escapeHtml(message.status_tone || '')}">${escapeHtml(message.status_label)}</span>
+          ${canCancel ? '<button class="queue-cancel" type="button">Cancel queued</button>' : ''}
+        </span>
       </div>
       ${receiptNote}
       <p class="message-body"></p>
     `;
     article.querySelector('.message-body').textContent = message.body;
+    const cancelButton = article.querySelector('.queue-cancel');
+    if (cancelButton) {
+      cancelButton.addEventListener('click', () => cancelQueuedMessage(message.id));
+    }
     els.chatHistory.appendChild(article);
   });
   els.chatHistory.scrollTop = els.chatHistory.scrollHeight;
+}
+
+async function cancelQueuedMessage(messageId) {
+  await api('/api/message-cancel', {
+    method: 'POST',
+    body: JSON.stringify({id: messageId}),
+  });
+  await refreshAll();
 }
 
 function renderNodes(nodes) {
@@ -323,8 +348,119 @@ function populateWaypointOptions() {
 
 function renderMapStatus(status) {
   state.mapStatus = status;
-  els.mapModeText.textContent = `${status.region} | coordinate plot placeholder | no basemap or internet tiles`;
+  const mapMode = status.tiles === 'local_raster' ? 'offline map package installed' : 'coordinate plot placeholder';
+  els.mapModeText.textContent = `${status.region} | ${mapMode} | no runtime internet tiles`;
+  els.mapLabel.textContent = status.tiles === 'local_raster' ? 'Offline map' : 'Coordinate plot - not a map';
+  els.mapNote.textContent = status.tiles === 'local_raster'
+    ? 'Local offline map tiles are installed for this area.'
+    : 'This is only a coordinate plot against rough regional bounds. It is not a street, topo, or parcel map.';
+  renderMapTiles(status);
   populateWaypointOptions();
+}
+
+function renderMapTiles(status) {
+  els.mapTiles.innerHTML = '';
+  const pkg = status.map_package;
+  if (!pkg || status.tiles !== 'local_raster') {
+    els.mapTiles.hidden = true;
+    return;
+  }
+  const zoom = Number(pkg.zoom_max || pkg.zoom_min || 10);
+  const bounds = status.bounds;
+  const xMin = lonToTileX(bounds.west, zoom);
+  const xMax = lonToTileX(bounds.east, zoom);
+  const yMin = latToTileY(bounds.north, zoom);
+  const yMax = latToTileY(bounds.south, zoom);
+  const west = Math.min(xMin, xMax);
+  const east = Math.max(xMin, xMax);
+  const north = Math.min(yMin, yMax);
+  const south = Math.max(yMin, yMax);
+  const width = east - west + 1;
+  const height = south - north + 1;
+  if (width <= 0 || height <= 0 || width * height > 400) {
+    els.mapTiles.hidden = true;
+    return;
+  }
+  els.mapTiles.hidden = false;
+  for (let x = west; x <= east; x += 1) {
+    for (let y = north; y <= south; y += 1) {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.src = `/api/map/tile?z=${zoom}&x=${x}&y=${y}`;
+      img.style.left = `${((x - west) / width) * 100}%`;
+      img.style.top = `${((y - north) / height) * 100}%`;
+      img.style.width = `${100 / width}%`;
+      img.style.height = `${100 / height}%`;
+      els.mapTiles.appendChild(img);
+    }
+  }
+}
+
+function applyMapTransform() {
+  const view = state.mapView;
+  els.mapPanLayer.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+}
+
+function zoomMap(delta, clientX = null, clientY = null) {
+  const view = state.mapView;
+  const previousScale = view.scale;
+  const nextScale = Math.max(1, Math.min(5, previousScale * delta));
+  if (nextScale === previousScale) return;
+  if (clientX !== null && clientY !== null) {
+    const rect = els.offlineMap.getBoundingClientRect();
+    const originX = clientX - rect.left - rect.width / 2;
+    const originY = clientY - rect.top - rect.height / 2;
+    const ratio = nextScale / previousScale;
+    view.x = originX - (originX - view.x) * ratio;
+    view.y = originY - (originY - view.y) * ratio;
+  }
+  view.scale = nextScale;
+  clampMapView();
+  applyMapTransform();
+}
+
+function resetMapView() {
+  state.mapView.scale = 1;
+  state.mapView.x = 0;
+  state.mapView.y = 0;
+  applyMapTransform();
+}
+
+function clampMapView() {
+  const view = state.mapView;
+  const rect = els.offlineMap.getBoundingClientRect();
+  const maxX = rect.width * (view.scale - 1) / 2;
+  const maxY = rect.height * (view.scale - 1) / 2;
+  view.x = Math.max(-maxX, Math.min(maxX, view.x));
+  view.y = Math.max(-maxY, Math.min(maxY, view.y));
+}
+
+function startMapDrag(event) {
+  if (event.button !== undefined && event.button !== 0) return;
+  state.mapView.dragging = true;
+  state.mapView.dragStartX = event.clientX;
+  state.mapView.dragStartY = event.clientY;
+  state.mapView.startX = state.mapView.x;
+  state.mapView.startY = state.mapView.y;
+  els.offlineMap.classList.add('dragging');
+  els.offlineMap.setPointerCapture?.(event.pointerId);
+}
+
+function moveMapDrag(event) {
+  if (!state.mapView.dragging) return;
+  state.mapView.x = state.mapView.startX + event.clientX - state.mapView.dragStartX;
+  state.mapView.y = state.mapView.startY + event.clientY - state.mapView.dragStartY;
+  clampMapView();
+  applyMapTransform();
+}
+
+function endMapDrag(event) {
+  if (!state.mapView.dragging) return;
+  state.mapView.dragging = false;
+  els.offlineMap.classList.remove('dragging');
+  els.offlineMap.releasePointerCapture?.(event.pointerId);
 }
 
 function renderPositions(positions) {
@@ -419,6 +555,15 @@ function projectPoint(latitude, longitude) {
     x: Math.min(96, Math.max(4, x)),
     y: Math.min(94, Math.max(6, y)),
   };
+}
+
+function lonToTileX(longitude, zoom) {
+  return Math.floor(((Number(longitude) + 180) / 360) * (2 ** zoom));
+}
+
+function latToTileY(latitude, zoom) {
+  const radians = Number(latitude) * Math.PI / 180;
+  return Math.floor((1 - Math.asinh(Math.tan(radians)) / Math.PI) / 2 * (2 ** zoom));
 }
 
 function selectWaypoint(id) {
@@ -1003,6 +1148,17 @@ els.addWaypointButton.addEventListener('click', () => {
   els.waypointName.focus();
 });
 els.clearWaypointButton.addEventListener('click', clearWaypointForm);
+els.mapZoomIn.addEventListener('click', () => zoomMap(1.25));
+els.mapZoomOut.addEventListener('click', () => zoomMap(0.8));
+els.mapReset.addEventListener('click', resetMapView);
+els.offlineMap.addEventListener('wheel', (event) => {
+  event.preventDefault();
+  zoomMap(event.deltaY < 0 ? 1.15 : 0.87, event.clientX, event.clientY);
+}, {passive: false});
+els.offlineMap.addEventListener('pointerdown', startMapDrag);
+els.offlineMap.addEventListener('pointermove', moveMapDrag);
+els.offlineMap.addEventListener('pointerup', endMapDrag);
+els.offlineMap.addEventListener('pointercancel', endMapDrag);
 els.waypointForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await saveWaypointForm();

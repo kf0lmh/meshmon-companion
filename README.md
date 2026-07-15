@@ -47,9 +47,10 @@ Current FieldStation scaffold provides:
 - A fullscreen-friendly local operator UI on the FieldStation service port.
 - Eight numbered channel tabs: `0 Public`, `1 Ops`, `2 WX`, `3 NCS`,
   `4 Logistics`, `5 Relay`, `6 Tactical`, `7 Test`.
-- Local message storage with explicit status events.
-- An offline Lincoln County, Missouri map view using a repo-local placeholder
-  surface in this phase.
+- Local message storage with explicit status events and operator cancellation
+  for queued local messages.
+- An offline map view that can use an installer-downloaded local raster tile
+  package, falling back to a clearly labeled coordinate placeholder.
 - Local waypoint storage, editing, status tracking, and queued waypoint sharing.
 - Pending received waypoint parsing from human-readable waypoint messages.
 - Net Log mode with local net sessions, manual entries, automatic local app
@@ -63,8 +64,8 @@ Current FieldStation scaffold provides:
 - Known node storage and locally assigned tactical callsigns.
 - A link and health status from the compatibility host control panel.
 
-FieldStation's USB adapter is read-only. On an installed service it runs through
-the managed Python environment at:
+FieldStation's node adapter defaults to read-only/no-transmit. On an installed
+service it runs through the managed Python environment at:
 
 ```text
 /opt/meshmon-companion/.venv-fieldstation
@@ -72,9 +73,9 @@ the managed Python environment at:
 
 When enabled and a USB serial node is available, FieldStation can read safe
 local node status, known nodes, telemetry fields that are already reported by
-the node, and channel slot metadata. It does not transmit messages, change node
-configuration, program channels, expose PSKs/channel keys, mark messages as
-seen by the mesh, or mark recipient ACKs.
+the node, and channel slot metadata. It does not change node configuration,
+program channels, expose PSKs/channel keys, mark messages as seen by the mesh,
+or mark recipient ACKs.
 
 For lab or workstation testing, FieldStation can also use a deliberately
 configured TCP serial bridge by setting `serial.connection_type: tcp` with
@@ -108,17 +109,24 @@ http://127.0.0.1:8091/
 The app is intentionally useful with no node connected. Queued messages,
 tactical callsigns, the node directory, channel profile rows, and status/event
 tracking are stored locally. Queued messages are clearly marked as local only
-until a future real adapter accepts them from the local node.
+until a real adapter accepts them from the local node. Operators can cancel
+queued/retry messages from the chat view to remove them from the active local
+send queue while preserving the status history.
 
 Phase 3 map and waypoint behavior:
 
-- The map screen is offline-only and currently uses a clearly labeled
-  placeholder surface for Lincoln County, Missouri.
-- No CDN scripts, online fonts, internet tiles, or external map APIs are used.
-- Future bundled PMTiles, MBTiles, or similar assets should live under
+- The map screen is offline-only. During first interactive install, the
+  installer asks for a map center location/address and radius, then downloads a
+  bounded local OpenStreetMap raster tile package under
   `/opt/meshmon-companion/data/fieldstation/maps`.
-- Click-to-coordinate is deferred until real local map data/projection exists;
-  operators enter coordinates manually in this placeholder phase.
+- If no package is configured or the download fails, FieldStation falls back to
+  a clearly labeled coordinate placeholder.
+- No CDN scripts, online fonts, internet tiles, or external map APIs are used.
+- Runtime map display uses only local files served by FieldStation.
+- Installed local map packages can be panned and zoomed inside the FieldStation
+  map view.
+- Future bundled PMTiles, MBTiles, or similar assets should also live under the
+  same map directory.
 - Sharing a waypoint creates a queued local message in the existing
   human-readable format. It is not marked sent, seen by mesh, or ACKed.
 - Received waypoint parsing is available through local FieldStation APIs and

@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -259,6 +260,14 @@ class FieldStationRepository:
             )
         return self.message(message_id)
 
+    def cancel_queued_message(self, message_id):
+        message = self.message(message_id)
+        if not message:
+            raise KeyError("Message not found")
+        if message["status"] not in ("queued_local", "retry_available"):
+            raise ValueError("Only queued or retry-available messages can be removed from the queue")
+        return self.transition_message(message_id, "canceled", "Removed from the local send queue by the operator.")
+
     def message_status_events(self, message_id):
         with self._connect() as conn:
             rows = conn.execute(
@@ -429,18 +438,36 @@ class FieldStationRepository:
         return self._node_dict(row) if row else None
 
     def map_status(self):
+        map_path = Path(os.environ.get("FIELDSTATION_OFFLINE_MAP_PATH", "/opt/meshmon-companion/data/fieldstation/maps"))
+        manifest = self._offline_map_manifest(map_path)
+        bounds = manifest.get("bounds") if manifest else LINCOLN_COUNTY_BOUNDS
+        region = manifest.get("display_name") or manifest.get("location") if manifest else "Lincoln County, Missouri"
+        tiles_downloaded = int(manifest.get("tiles_downloaded", 0) or 0) + int(manifest.get("tiles_reused", 0) or 0) if manifest else 0
         return {
-            "region": "Lincoln County, Missouri",
-            "mode": "offline_placeholder",
-            "tiles": "placeholder",
-            "asset_path": "data/fieldstation/maps",
+            "region": region,
+            "mode": "offline_tiles" if tiles_downloaded else "offline_placeholder",
+            "tiles": "local_raster" if tiles_downloaded else "placeholder",
+            "asset_path": str(map_path),
             "internet_required": False,
             "live_node_positions": False,
-            "bounds": LINCOLN_COUNTY_BOUNDS,
+            "bounds": bounds,
+            "map_package": manifest,
             "waypoint_types": list(WAYPOINT_TYPES),
             "waypoint_statuses": list(WAYPOINT_STATUSES),
-            "detail": "Offline placeholder map surface. Real bundled PMTiles/MBTiles can be added later.",
+            "detail": "Offline local map package is installed." if tiles_downloaded else "Offline placeholder map surface. Add/download a local map package for a basemap.",
         }
+
+    def _offline_map_manifest(self, map_path):
+        manifest_path = map_path / "manifest.json"
+        if not manifest_path.exists():
+            return None
+        try:
+            data = json.loads(manifest_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        return data
 
     def positions(self):
         with self._connect() as conn:

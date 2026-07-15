@@ -96,19 +96,27 @@ def page():
             <h2>Lincoln County, Missouri</h2>
             <p id="mapModeText">Coordinate plot placeholder. No basemap, internet tiles, or live telemetry.</p>
           </div>
-          <button id="addWaypointButton" class="small-button" type="button">Add Waypoint</button>
+          <div class="map-controls">
+            <button id="mapZoomOut" class="small-button" type="button" title="Zoom out">-</button>
+            <button id="mapZoomIn" class="small-button" type="button" title="Zoom in">+</button>
+            <button id="mapReset" class="small-button" type="button">Reset</button>
+            <button id="addWaypointButton" class="small-button" type="button">Add Waypoint</button>
+          </div>
         </div>
-        <div id="offlineMap" class="offline-map" role="img" aria-label="Coordinate plot placeholder, not a basemap">
-          <div class="map-grid"></div>
-          <div class="map-label">Coordinate plot - not a map</div>
+        <div id="offlineMap" class="offline-map" role="img" aria-label="Offline map">
+          <div id="mapPanLayer" class="map-pan-layer">
+            <div id="mapTiles" class="map-tiles"></div>
+            <div class="map-grid"></div>
+            <div id="nodeMarkers" class="marker-layer"></div>
+            <div id="waypointMarkers" class="marker-layer"></div>
+          </div>
+          <div id="mapLabel" class="map-label">Coordinate plot - not a map</div>
           <div class="map-axis north">N</div>
           <div class="map-axis south">S</div>
           <div class="map-axis west">W</div>
           <div class="map-axis east">E</div>
-          <div id="nodeMarkers" class="marker-layer"></div>
-          <div id="waypointMarkers" class="marker-layer"></div>
         </div>
-        <p class="map-note">This is only a coordinate plot against rough regional bounds. It is not a street, topo, or parcel map.</p>
+        <p id="mapNote" class="map-note">This is only a coordinate plot against rough regional bounds. It is not a street, topo, or parcel map.</p>
       </section>
 
       <aside class="map-side">

@@ -24,6 +24,14 @@ fieldstation:
   adapter_cache_seconds: 30
   read_timeout_seconds: 12
 
+offline_map:
+  enabled: false
+  location: ""
+  radius_miles: 10
+  zoom_min: 10
+  zoom_max: 13
+  source: openstreetmap
+
 compatibility:
   optional_stack_enabled: false
 

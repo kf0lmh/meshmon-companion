@@ -19,6 +19,7 @@ ROOT = Path(os.environ.get("FIELDSTATION_ROOT", "/opt/meshmon-companion"))
 PORT = int(os.environ.get("FIELDSTATION_PORT", "8091"))
 BIND = os.environ.get("FIELDSTATION_BIND", "127.0.0.1")
 CONFIGURED_PORT = os.environ.get("FIELDSTATION_SERIAL_PORT", "")
+OFFLINE_MAP_PATH = Path(os.environ.get("FIELDSTATION_OFFLINE_MAP_PATH", "/opt/meshmon-companion/data/fieldstation/maps"))
 
 
 def esc(value):
@@ -77,6 +78,35 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_map_tile(self, query):
+        try:
+            z = int(query.get("z", [""])[0])
+            x = int(query.get("x", [""])[0])
+            y = int(query.get("y", [""])[0])
+        except (TypeError, ValueError):
+            self.send_html("<h1>Bad tile request</h1>", 400)
+            return
+        if z < 0 or x < 0 or y < 0:
+            self.send_html("<h1>Bad tile request</h1>", 400)
+            return
+        path = OFFLINE_MAP_PATH / "tiles" / "osm" / str(z) / str(x) / f"{y}.png"
+        try:
+            resolved = path.resolve()
+            root = OFFLINE_MAP_PATH.resolve()
+        except OSError:
+            self.send_html("<h1>Not found</h1>", 404)
+            return
+        if root not in resolved.parents or not resolved.exists():
+            self.send_html("<h1>Not found</h1>", 404)
+            return
+        data = resolved.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.end_headers()
+        self.wfile.write(data)
+
     def read_json_body(self):
         length = int(self.headers.get("Content-Length", "0") or "0")
         if not length:
@@ -127,6 +157,8 @@ class Handler(BaseHTTPRequestHandler):
             repo = self.repo_or_503()
             if repo:
                 self.send_json(repo.map_status())
+        elif path == "/api/map/tile":
+            self.send_map_tile(query)
         elif path == "/api/positions":
             repo = self.repo_or_503()
             if repo:
@@ -210,6 +242,14 @@ class Handler(BaseHTTPRequestHandler):
                 if repo:
                     nodes = repo.set_tactical_callsign(node_id, tactical)
                     self.send_json({"nodes": nodes})
+            elif path == "/api/message-cancel":
+                message_id = payload.get("id")
+                if message_id is None:
+                    self.send_json({"error": "id is required"}, 400)
+                    return
+                repo = self.repo_or_503()
+                if repo:
+                    self.send_json({"message": repo.cancel_queued_message(message_id)})
             elif path == "/api/channel-profiles":
                 repo = self.repo_or_503()
                 if repo:

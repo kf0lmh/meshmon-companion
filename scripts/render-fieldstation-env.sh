@@ -9,8 +9,13 @@ section_value() {
   local value
   value="$(awk -v section="$section" -v key="$key" '
     $0 ~ "^[^[:space:]].*:$" { current=$1; sub(/:$/, "", current) }
-    current == section && $1 == key ":" { print $2; exit }
-  ' "$CONFIG" 2>/dev/null | tr -d '"')"
+    current == section && $1 == key ":" {
+      sub("^[^:]+:[[:space:]]*", "", $0)
+      gsub(/^"|"$/, "", $0)
+      print
+      exit
+    }
+  ' "$CONFIG" 2>/dev/null)"
   printf '%s\n' "${value:-$default}"
 }
 
@@ -30,6 +35,7 @@ control_bind="$(top_value control_bind "127.0.0.1")"
 fieldstation_bind="$(section_value fieldstation bind "$control_bind")"
 fieldstation_port="$(section_value fieldstation port "$(port_value fieldstation "8091")")"
 fieldstation_db="$(section_value fieldstation database "/opt/meshmon-companion/data/fieldstation/fieldstation.sqlite3")"
+offline_map_path="$(section_value fieldstation offline_map_path "/opt/meshmon-companion/data/fieldstation/maps")"
 read_only_usb_enabled="$(section_value fieldstation read_only_usb_enabled "true")"
 tx_enabled="$(section_value fieldstation tx_enabled "false")"
 serial_autodetect="$(section_value fieldstation serial_autodetect "true")"
@@ -45,6 +51,7 @@ cat > "$OUT" <<EOF
 FIELDSTATION_BIND=$fieldstation_bind
 FIELDSTATION_PORT=$fieldstation_port
 FIELDSTATION_DB=$fieldstation_db
+FIELDSTATION_OFFLINE_MAP_PATH=$offline_map_path
 FIELDSTATION_CONNECTION_TYPE=$serial_connection_type
 FIELDSTATION_SERIAL_PORT=$serial_device
 FIELDSTATION_NODE_HOST=$serial_tcp_host
